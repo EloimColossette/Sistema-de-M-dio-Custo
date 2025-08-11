@@ -126,8 +126,7 @@ class RegistroTeste(tk.Toplevel):
             ("Excluir", self.excluir), ("Limpar", self.limpar),
             ("Voltar", self.voltar_para_menu)
         ]:
-            ttk.Button(btn_frame, text=text, command=cmd, width=15, style="Mini.TButton")\
-               .pack(side="left", padx=3)
+            ttk.Button(btn_frame, text=text, command=cmd, width=15, style="Mini.TButton").pack(side="left", padx=3)
 
         # Treeview
         tree_frame = tk.Frame(main)
