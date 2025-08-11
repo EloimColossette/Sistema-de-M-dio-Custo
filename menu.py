@@ -1450,7 +1450,19 @@ class Janela_Menu(tk.Tk):
             for r in rows:
                 data_fmt = formatar_data(r[0])
                 area_fmt = formatar_numero(r[7], casas=4) if r[7] is not None else ""
-                along_fmt = formatar_numero(r[10], casas=2) if r[10] is not None else ""
+                # ---- Alteração: mostrar apenas inteiro + '%' (ex: 45% ou 5%)
+                if r[10] is not None and str(r[10]).strip() != "":
+                    try:
+                        # converte robustamente (troca vírgula por ponto se necessário)
+                        raw = str(r[10]).replace(",", ".")
+                        inteiro = int(float(raw) + 0.5)  # arredondamento half-up
+                        along_fmt = f"{inteiro}%"
+                    except Exception:
+                        along_fmt = ""
+                else:
+                    along_fmt = ""
+                # ---- fim alteração
+
                 values = (
                     data_fmt,
                     r[1] or "",
