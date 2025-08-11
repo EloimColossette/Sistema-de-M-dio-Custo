@@ -512,6 +512,11 @@ class RegistroTeste(tk.Toplevel):
         try:
             self.cursor.execute(sql, params)
             self.conn.commit()
+            self.cursor.execute(
+                "NOTIFY canal_atualizacao, 'menu_atualizado';"
+            )
+            # como já fizemos commit acima, basta outro commit para o NOTIFY
+            self.conn.commit()
             messagebox.showinfo("Sucesso", "Registro salvo com sucesso!")
             self.limpar() 
             self.atualizar_treeview()
@@ -606,6 +611,11 @@ class RegistroTeste(tk.Toplevel):
         try:
             self.cursor.execute(sql, params)
             self.conn.commit()
+            self.cursor.execute(
+                "NOTIFY canal_atualizacao, 'menu_atualizado';"
+            )
+            # como já fizemos commit acima, basta outro commit para o NOTIFY
+            self.conn.commit()
             messagebox.showinfo("Sucesso", "Registro alterado com sucesso!")
             self.atualizar_treeview()
             self.limpar()
@@ -628,6 +638,11 @@ class RegistroTeste(tk.Toplevel):
             placeholders = ",".join(["%s"] * count)
             sql = f"DELETE FROM registro_teste WHERE id IN ({placeholders});"
             self.cursor.execute(sql, tuple(ids))
+            self.conn.commit()
+            self.cursor.execute(
+                "NOTIFY canal_atualizacao, 'menu_atualizado';"
+            )
+            # como já fizemos commit acima, basta outro commit para o NOTIFY
             self.conn.commit()
 
             self.atualizar_treeview()

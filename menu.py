@@ -54,9 +54,18 @@ class Janela_Menu(tk.Tk):
         self._criar_menubar()
         self._criar_menu_lateral()
         self.configurar_estilos()
-        self.notebook = ttk.Notebook(self.main_content, style="Menu.TNotebook")
+         # cria barra de abas customizada (setas + canvas)
+        self._criar_barra_abas()
+
+        # Notebook sem abas nativas (usamos Hidden.TNotebook para esconder o header)
+        self.notebook = ttk.Notebook(self.main_content, style="Hidden.TNotebook")
         self.notebook.pack(fill="both", expand=True)
+
+        # cria abas padrão
         self._criar_abas()
+
+        # sincroniza a barra custom com as abas criadas
+        self._atualizar_barra_abas()
 
         # Atualiza estilos ao recuperar o foco e fecha o programa corretamente
         self.bind("<FocusIn>", lambda e: self.configurar_estilos())
@@ -307,6 +316,11 @@ class Janela_Menu(tk.Tk):
             self.frame_grafico_dolar = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_grafico_dolar, text="Gráfico Dólar")
             self.criar_grafico_dolar()
+        # Últimos Registros de Teste (se permitido)
+        if "RegistroTeste" in self.permissoes:
+            self.frame_ultimos_registros_teste = tk.Frame(self.notebook, bg="#ecf0f1")
+            self.notebook.add(self.frame_ultimos_registros_teste, text="Últimos Registros de Teste")
+            self.criar_aba_ultimos_registros_teste()
 
     def configurar_estilos(self):
         """Configura os estilos do ttk para Notebook e Treeview."""
@@ -334,6 +348,113 @@ class Janela_Menu(tk.Tk):
         style.map("Treeview",
                   background=[("selected", "#2980b9")],
                   foreground=[("selected", "white")])
+
+        # === esconder as tabs nativas do Notebook ===
+        # Alguns temas/versões requerem esconder tanto o layout do Notebook quanto o layout da Tab.
+        try:
+            style.layout("Hidden.TNotebook.Tab", [])  # remove layout das tabs
+            style.layout("Hidden.TNotebook", [("Notebook.client", {"sticky": "nswe"})])  # mantém apenas a "client area"
+        except Exception:
+            # se falhar por causa do tema, relaxa — não é crítico, mas normalmente funciona
+            pass
+
+    def _criar_barra_abas(self):
+        """Cria a barra de abas com setas e canvas rolável."""
+        self.tabbar = tk.Frame(self.main_content, bg="#bdc3c7", height=36)
+        self.tabbar.pack(side="top", fill="x")
+
+        self.tab_left = tk.Button(self.tabbar, text="◀", bd=0, width=3,
+                                  command=lambda: self._rolar_abas(-200))
+        self.tab_left.pack(side="left", padx=2, pady=2)
+
+        self.tab_right = tk.Button(self.tabbar, text="▶", bd=0, width=3,
+                                   command=lambda: self._rolar_abas(200))
+        self.tab_right.pack(side="right", padx=2, pady=2)
+
+        self.tab_canvas = tk.Canvas(self.tabbar, bg="#bdc3c7", height=36, highlightthickness=0)
+        self.tab_canvas.pack(side="left", fill="x", expand=True)
+
+        self.tab_buttons_frame = tk.Frame(self.tab_canvas, bg="#bdc3c7")
+        self.tab_canvas.create_window((0, 0), window=self.tab_buttons_frame, anchor="nw")
+
+        # Atualiza região rolável quando os botões mudam
+        def _on_cfg(e):
+            self.tab_canvas.configure(scrollregion=self.tab_canvas.bbox("all"))
+        self.tab_buttons_frame.bind("<Configure>", _on_cfg)
+
+        # rolagem horizontal com Shift+Scroll (Windows). opcional.
+        def _on_mousewheel_h(event):
+            delta = int(-1 * (event.delta / 120))
+            self.tab_canvas.xview_scroll(delta, "units")
+        self.tab_canvas.bind_all("<Shift-MouseWheel>", _on_mousewheel_h)
+
+    def _atualizar_barra_abas(self):
+        """Reconstrói os botões das abas conforme self.notebook.tabs()."""
+        # limpa
+        for w in self.tab_buttons_frame.winfo_children():
+            w.destroy()
+
+        # recria botões para cada aba (mantemos a ordem do notebook)
+        for tab_id in self.notebook.tabs():
+            text = self.notebook.tab(tab_id, option="text")
+            btn = tk.Button(
+                self.tab_buttons_frame,
+                text=text,
+                bd=0,
+                padx=10,
+                pady=6,
+                relief="flat",
+                command=lambda t=tab_id: self._selecionar_e_destacar_aba(t)
+            )
+            btn.pack(side="left", padx=2, pady=2)
+
+        self.update_idletasks()
+        self._destacar_aba_selecionada()
+
+    def _selecionar_e_destacar_aba(self, tab_id):
+        """Seleciona a aba do notebook e garante que seu botão esteja visível/realçado."""
+        self.notebook.select(tab_id)
+        self._destacar_aba_selecionada()
+
+        # garante visibilidade do botão correspondente
+        btn = None
+        selected_text = self.notebook.tab(tab_id, "text")
+        for child in self.tab_buttons_frame.winfo_children():
+            if getattr(child, "cget", lambda x: "")("text") == selected_text:
+                btn = child
+                break
+        if not btn:
+            return
+
+        # coordenadas do botão
+        x1 = btn.winfo_x()
+        x2 = x1 + btn.winfo_width()
+        canvas_w = self.tab_canvas.winfo_width()
+        view_left = self.tab_canvas.canvasx(0)
+
+        total_width = max(1, self.tab_buttons_frame.winfo_width())
+        if x1 < view_left:
+            self.tab_canvas.xview_moveto(x1 / total_width)
+        elif x2 > view_left + canvas_w:
+            self.tab_canvas.xview_moveto((x2 - canvas_w) / total_width)
+
+    def _destacar_aba_selecionada(self):
+        """Aplica visual diferente ao botão da aba selecionada."""
+        selected = self.notebook.select()
+        sel_text = self.notebook.tab(selected, "text") if selected else None
+        for child in self.tab_buttons_frame.winfo_children():
+            try:
+                if child.cget("text") == sel_text:
+                    child.config(bg="#ecf0f1", relief="raised")
+                else:
+                    child.config(bg="#bdc3c7", relief="flat")
+            except Exception:
+                pass
+
+    def _rolar_abas(self, delta):
+        """Rola horizontalmente o canvas das abas. delta em pixels aproximados."""
+        units = int(delta / 10)
+        self.tab_canvas.xview_scroll(units, "units")
 
     def carregar_nome_usuario(self, user_id):
         """Busca o nome do usuário no banco de dados usando o user_id."""
@@ -381,6 +502,7 @@ class Janela_Menu(tk.Tk):
                 ("criar_media_custo",         self.frame_graficos, "Gráficos de Custo"),
                 ("CadastroProdutosApp",       self.frame_grafico_produtos, "Gráfico Produtos"),
                 ("CadastroProdutosApp",       self.frame_grafico_dolar, "Gráfico Dólar"),
+                ("RegistroTeste",             self.frame_ultimos_registros_teste, "Registro de Teste"),
             ]
 
             for nome, frame, titulo in abas:
@@ -541,6 +663,15 @@ class Janela_Menu(tk.Tk):
                 for w in self.frame_grafico_dolar.winfo_children():
                     w.destroy()
                 self.criar_grafico_dolar()
+
+            # 4.7) Últimos Registros de Teste
+            if "RegistroTeste" in self.permissoes:
+                # só tenta atualizar se o frame existir
+                if hasattr(self, "frame_ultimos_registros_teste"):
+                    for w in self.frame_ultimos_registros_teste.winfo_children():
+                        w.destroy()
+                    # repopula a aba
+                    self.criar_aba_ultimos_registros_teste()
 
             # 5) Força o Tkinter a processar redraw
             self.update_idletasks()
@@ -1164,7 +1295,7 @@ class Janela_Menu(tk.Tk):
 
         # Criar figura e eixo
         fig, ax = plt.subplots(figsize=(16, 4))
-        fig.subplots_adjust(top=0.85, left=0.12, right=0.95, bottom=0.20)
+        fig.subplots_adjust(top=0.85, left=0.18, right=0.95, bottom=0.20)
 
         # Plotar
         linha, = ax.plot(datas, medias['dolar'], label="Dólar", color="#4682B4", marker='o')
@@ -1191,7 +1322,7 @@ class Janela_Menu(tk.Tk):
         # >>>>>>>>>>>> CRIAÇÃO DO CANVAS <<<<<<<<<<<<
         self.canvas_dolar = FigureCanvasTkAgg(fig, master=self.frame_grafico_dolar)  # frame_grafico_dolar agora
         self.canvas_dolar.draw()
-        self.canvas_dolar.get_tk_widget().pack(fill="both", expand=True)
+        self.canvas_dolar.get_tk_widget().pack(side="right", fill="both", expand=True)
 
         # Tooltip com valor com vírgula
         cursor_obj = mplcursors.cursor([linha], hover=True)
@@ -1220,6 +1351,134 @@ class Janela_Menu(tk.Tk):
 
         ax.yaxis.set_major_formatter(FuncFormatter(formatar_eixo_y))
             
+    def criar_aba_ultimos_registros_teste(self):
+        """
+        Cria uma aba/section 'Últimos Registros' exibindo todos os registros cuja
+        data == MAX(data) (última data presente na tabela).
+        """
+        if not getattr(self, "conn", None):
+            print("Erro: Conexão com o banco de dados indisponível.")
+            return
+
+        # formata data para dd/mm/YYYY
+        def formatar_data(data_valor):
+            try:
+                if hasattr(data_valor, "strftime"):
+                    return data_valor.strftime("%d/%m/%Y")
+                else:
+                    return datetime.datetime.strptime(str(data_valor), "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                return data_valor
+
+        # formata area/alongamento com separador BR (opcional)
+        def formatar_numero(valor, casas=4):
+            try:
+                s = f"{float(valor):,.{casas}f}"
+                s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+                return s
+            except Exception:
+                return valor
+
+        # limpa frame antigo (se existir)
+        try:
+            for w in self.frame_ultimos_registros_teste.winfo_children():
+                w.destroy()
+        except Exception:
+            pass
+
+        frame = self.frame_ultimos_registros_teste
+
+        lblframe = tk.LabelFrame(frame, text="Últimos Registros", bg="#ecf0f1", font=("Arial", 12, "bold"))
+        lblframe.pack(fill="both", padx=10, pady=10, expand=True)
+
+        # frame do treeview
+        frame_treeview = tk.Frame(lblframe)
+        frame_treeview.pack(fill="both", padx=5, pady=5, expand=True)
+
+        colunas = ("Data", "Código Barras", "OP", "Cliente", "Material", "Liga",
+                "Dimensões", "Área", "LR Tração (N)", "LR Tração (MPa)",
+                "Alongamento (%)", "Tempera", "Máquina", "Empresa")
+
+        # guarda o treeview no self para poder atualizar de fora depois
+        self.tree_registros_teste = ttk.Treeview(frame_treeview, columns=colunas, show="headings", height=10)
+
+        # cabeçalhos / larguras (ajuste conforme desejar)
+        larguras = {
+            "Data": 90, "Código Barras": 150, "OP": 80, "Cliente": 200, "Material": 140,
+            "Liga": 100, "Dimensões": 140, "Área": 90, "LR Tração (N)": 120,
+            "LR Tração (MPa)": 120, "Alongamento (%)": 120, "Tempera": 100, "Máquina": 150, "Empresa": 150
+        }
+
+        # centraliza cabeçalho e conteúdo das colunas
+        for c in colunas:
+            self.tree_registros_teste.heading(c, text=c, anchor="center")
+            self.tree_registros_teste.column(c, width=larguras.get(c, 100), anchor="center", stretch=True)
+
+        # scrollbars (vertical + horizontal)
+        vsb = ttk.Scrollbar(frame_treeview, orient="vertical", command=self.tree_registros_teste.yview)
+        hsb = ttk.Scrollbar(frame_treeview, orient="horizontal", command=self.tree_registros_teste.xview)
+        self.tree_registros_teste.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # layout com grid para que os scrollbars fiquem certinhos
+        self.tree_registros_teste.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, columnspan=2, sticky="ew")
+
+        # configura pesos para expansão correta
+        frame_treeview.grid_rowconfigure(0, weight=1)
+        frame_treeview.grid_columnconfigure(0, weight=1)
+
+        # consulta e preenchimento
+        try:
+            cur = self.conn.cursor()
+            cur.execute("""
+                SELECT data, codigo_barras, op, cliente, material, liga,
+                    dimensoes, area, lr_tracao_n, lr_tracao_mpa,
+                    alongamento_percentual, tempera, maquina, empresa
+                FROM registro_teste
+                WHERE data = (SELECT MAX(data) FROM registro_teste)
+                ORDER BY id;
+            """)
+            rows = cur.fetchall()
+            cur.close()
+        except Exception as e:
+            print("Erro ao buscar últimos registros:", e)
+            rows = []
+
+        if not rows:
+            # se não houver registros, mostra uma linha indicando isso
+            self.tree_registros_teste.insert("", "end", values=("Nenhum registro encontrado",) + ("",) * (len(colunas)-1))
+        else:
+            for r in rows:
+                data_fmt = formatar_data(r[0])
+                area_fmt = formatar_numero(r[7], casas=4) if r[7] is not None else ""
+                along_fmt = formatar_numero(r[10], casas=2) if r[10] is not None else ""
+                values = (
+                    data_fmt,
+                    r[1] or "",
+                    r[2] or "",
+                    r[3] or "",
+                    r[4] or "",
+                    r[5] or "",
+                    r[6] or "",
+                    area_fmt,
+                    r[8] or "",
+                    r[9] or "",
+                    along_fmt,
+                    r[11] or "",
+                    r[12] or "",
+                    r[13] or ""
+                )
+                self.tree_registros_teste.insert("", "end", values=values)
+
+        # opcional: atualizar barra de abas customizada
+        try:
+            atualizar_barra = getattr(self, "_atualizar_barra_abas", None)
+            if atualizar_barra:
+                atualizar_barra()
+        except Exception:
+            pass
+
     def logout(self):
         from login import TelaLogin
         self.destroy()  # Fecha a janela de menu
