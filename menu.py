@@ -1406,7 +1406,7 @@ class Janela_Menu(tk.Tk):
         larguras = {
             "Data": 90, "Código Barras": 150, "OP": 80, "Cliente": 200, "Material": 140,
             "Liga": 100, "Dimensões": 140, "Área": 90, "LR Tração (N)": 120,
-            "LR Tração (MPa)": 120, "Alongamento (%)": 120, "Tempera": 100, "Máquina": 150, "Empresa": 150
+            "LR Tração (MPa)": 150, "Alongamento (%)": 150, "Tempera": 100, "Máquina": 150, "Empresa": 150
         }
 
         # centraliza cabeçalho e conteúdo das colunas
