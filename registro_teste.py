@@ -318,7 +318,7 @@ class RegistroTeste(tk.Toplevel):
                 row[6], row[7],
                 f"{row[8]:.5f}".replace(".", ",") if row[8] is not None else "",
                 lr_n, lr_mpa,
-                f"{row[11]:.2f}".replace(".", ",") + "%" if row[11] is not None else "",
+                f"{row[11]:.0f}%" if row[11] is not None else "",
                 row[12], row[13], row[14]
             ]
             if not term or any(term in str(v).lower() for v in vals):
