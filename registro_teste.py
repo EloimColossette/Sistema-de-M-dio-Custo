@@ -146,7 +146,7 @@ class RegistroTeste(tk.Toplevel):
             self.tree.column(c, width=150, anchor="center")
         self.tree.column("Data", width=80)
         self.tree.column("Área", width=100)
-        self.tree.column("Alongamento (%)", width=100)
+        self.tree.column("Alongamento (%)", width=150)
 
         self.tree.bind("<<TreeviewSelect>>", self.carregar_dados)
 
