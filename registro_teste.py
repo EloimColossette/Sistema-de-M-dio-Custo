@@ -296,7 +296,7 @@ class RegistroTeste(tk.Toplevel):
     def _filter_rows(self, term):
         """
         term: string com o que foi digitado no Entry.
-        Se term == \"\", exibe tudo.
+        Se term == "", exibe tudo.
         """
         term = term.lower().strip()
         print(f"[DEBUG] _filter_rows() chamado com termo: '{term}'")
@@ -305,12 +305,19 @@ class RegistroTeste(tk.Toplevel):
         for row in getattr(self, 'all_rows', []):
             rec_id, raw = row[0], row[1]
             data = raw.strftime("%d/%m/%Y") if hasattr(raw, "strftime") else str(raw or "")
+
+            # Lê os ranges de tração e substitui vazios por "0,0 - 0,0"
+            lr_n_val = row[9]
+            lr_mpa_val = row[10]
+            lr_n = lr_n_val if (lr_n_val is not None and str(lr_n_val).strip() != "") else "0,0 - 0,0"
+            lr_mpa = lr_mpa_val if (lr_mpa_val is not None and str(lr_mpa_val).strip() != "") else "0,0 - 0,0"
+
             vals = [
                 data,
                 row[2], row[3], row[4], row[5],
                 row[6], row[7],
                 f"{row[8]:.5f}".replace(".", ",") if row[8] is not None else "",
-                row[9] or "", row[10] or "",
+                lr_n, lr_mpa,
                 f"{row[11]:.2f}".replace(".", ",") + "%" if row[11] is not None else "",
                 row[12], row[13], row[14]
             ]
