@@ -328,7 +328,7 @@ class Janela_Menu(tk.Tk):
         style.theme_use("alt")
         style.configure("Menu.TNotebook", background="#ecf0f1", borderwidth=0)
         style.configure("Menu.TNotebook.Tab",
-                        font=("Arial", 10),
+                        font=("Arial", 15),
                         padding=[10, 5],
                         background="#bdc3c7",
                         foreground="black",
@@ -400,6 +400,7 @@ class Janela_Menu(tk.Tk):
             btn = tk.Button(
                 self.tab_buttons_frame,
                 text=text,
+                font=("Arial", 12),
                 bd=0,
                 padx=10,
                 pady=6,
