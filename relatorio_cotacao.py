@@ -25,7 +25,7 @@ class CadastroProdutosApp:
         self.window.title("Cotação")
         self.window.geometry("1000x600")
         self.window.state("zoomed")
-        self.window.option_add("*Font", "Helvetica 11")
+        # self.window.option_add("*Font", "Helvetica 11")
 
         # Ícone e estilos
         aplicar_icone(self.window, r"C:\Sistema\logos\Kametal.ico")
@@ -162,7 +162,7 @@ class CadastroProdutosApp:
 
         # Definindo as colunas do Treeview, com a coluna "id" oculta
         colunas = ["id", "Período"] + self.produtos
-        self.tree = ttk.Treeview(self.frame_tree, columns=colunas, show="headings")
+        self.tree = ttk.Treeview(self.frame_tree, columns=colunas, show="headings", style="Cotacao.Treeview")
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar_y = ttk.Scrollbar(self.frame_tree, orient="vertical", command=self.tree.yview)
         scrollbar_y.pack(side="right", fill="y")
@@ -174,42 +174,40 @@ class CadastroProdutosApp:
         for coluna in self.produtos:
             self.tree.heading(coluna, text=coluna)
             self.tree.column(coluna, width=120, anchor="center")
-        self.tree.config(style="Treeview", height=22)
+        self.tree.config(style="Cotacao.Treeview", height=22)
 
         # Bind para que ao selecionar uma linha os dados apareçam nas entradas
         self.tree.bind('<<TreeviewSelect>>', self.selecionar_linha)
 
     def configurar_estilos(self):
-        estilo = ttk.Style()
-        estilo.theme_use("alt")
-        estilo.configure("Treeview", 
-                         font=("Arial", 10), 
-                         rowheight=27, 
-                         background="white", 
-                         foreground="black", 
-                         fieldbackground="white")
-        estilo.configure("Treeview.Heading", 
-                         font=("Arial", 10, "bold"))
-        estilo.configure("Total.Treeview", 
-                         background="#FFD700", 
-                         foreground="black", 
-                         font=("Arial", 12, "bold"))
-        estilo.map("Treeview", 
-                   background=[("selected", "blue")], 
-                   foreground=[("selected", "white")])
-        estilo.configure("RelatorioCota.TButton",
-                         padding=(5, 2),
-                         relief="raised",
-                         background="#A9A9A9",
-                         foreground="white",
-                         font=("Arial", 10, "bold"),
-                         borderwidth=2,
-                         highlightbackground="#696969",
-                         highlightthickness=1)
-        estilo.map("RelatorioCota.TButton", 
-                   background=[("active", "#808080")],
-                   foreground=[("active", "white")], 
-                   relief=[("pressed", "sunken"), ("!pressed", "raised")])
+        """
+        Estilos LOCAIS para o relatório de cotação — NÃO altera 'Treeview' global
+        nem toca nos estilos de botão.
+        """
+        estilo = ttk.Style(self.window)
+        try:
+            estilo.theme_use("alt")
+        except Exception:
+            pass
+
+        # Estilo exclusivo para a Treeview deste módulo
+        estilo.configure("Cotacao.Treeview",
+                        font=("Arial", 10),
+                        rowheight=27,
+                        background="white",
+                        foreground="black",
+                        fieldbackground="white")
+        estilo.configure("Cotacao.Treeview.Heading",
+                        font=("Arial", 10, "bold"))
+        estilo.map("Cotacao.Treeview",
+                background=[("selected", "#0a64ad")],
+                foreground=[("selected", "white")])
+
+        # (opcional) estilo para linhas de total, se você usar algo assim:
+        estilo.configure("Cotacao.Total.Treeview",
+                        background="#FFD700",
+                        foreground="black",
+                        font=("Arial", 12, "bold"))
         
     def obter_menor_id_disponivel(self):
         self.cursor.execute("SELECT id FROM cotacao_produtos ORDER BY id")

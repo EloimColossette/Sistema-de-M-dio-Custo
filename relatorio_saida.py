@@ -86,16 +86,15 @@ class RelatorioApp(tk.Toplevel):  # Herda de Toplevel
         estilo.theme_use("alt")
 
         # Estilo básico para linhas da tabela
-        estilo.configure("Treeview", 
-                         font=("Arial", 10), 
-                         rowheight=35,  # Aumenta a altura das linhas
-                         background="white", 
-                         foreground="black", 
-                         fieldbackground="white")
+        estilo.configure("Saida.Treeview",
+                 font=("Arial", 10),
+                 rowheight=35,
+                 background="white",
+                 foreground="black",
+                 fieldbackground="white")
 
-        # Estilo do cabeçalho
-        estilo.configure("Treeview.Heading", 
-                         font=("Arial", 10, "bold"))
+        estilo.configure("Saida.Treeview.Heading",
+                        font=("Arial", 10, "bold"))
 
         # Estilo dos botões
         estilo.configure("Voltar.TButton",
@@ -196,7 +195,7 @@ class RelatorioApp(tk.Toplevel):  # Herda de Toplevel
         frame_tabela.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         colunas = ("Data", "NF", "Produto", "Peso")
-        tabela = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
+        tabela = ttk.Treeview(frame_tabela, columns=colunas, show="headings", style="Saida.Treeview")
 
         for coluna, largura in zip(colunas, [100, 100, 300, 150]):
             tabela.heading(coluna, text=coluna)
