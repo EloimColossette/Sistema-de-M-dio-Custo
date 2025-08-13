@@ -1287,6 +1287,10 @@ class CalculoProduto:
         )
 
     def pesquisar(self):
+        # Salva a ordem atual dos itens (apenas na primeira pesquisa)
+        if not hasattr(self, "ordem_original") or not self.ordem_original:
+            self.ordem_original = list(self.treeview.get_children())
+        
         # Obtém o termo de busca sem acentos e em minúsculas
         termo = self.remove_acento(self.entrada_pesquisa.get().lower())
         
@@ -1306,10 +1310,24 @@ class CalculoProduto:
 
     def limpar_pesquisa(self):
         self.entrada_pesquisa.delete(0, "end")
+
+        # Reexibe todos os itens ocultos (reattach sem usar 'end' para preservar posição)
         for item in self.itens_ocultos:
-            self.treeview.reattach(item, "", "end")  # Reexibe todos os itens ocultos
-        self.itens_ocultos.clear()  # Limpa a lista de itens ocultos
-        self.reordenar_treeview()  # Reordena os itens do treeview por data e NF
+            # Ao reattach sem especificar índice, ele volta a posição anterior; 
+            # se precisar garantir posição, vamos reposicionar mais abaixo usando ordem_original
+            self.treeview.reattach(item, "", "end")
+        self.itens_ocultos.clear()
+
+        # Se salvamos a ordem original antes da pesquisa, restauramos exatamente essa ordem
+        if hasattr(self, "ordem_original") and self.ordem_original:
+            for idx, item in enumerate(self.ordem_original):
+                try:
+                    self.treeview.move(item, '', idx)
+                except Exception:
+                    # se algum item não existir mais, apenas ignora
+                    pass
+            # limpamos o buffer da ordem original (próxima pesquisa nova ordem será salva novamente)
+            self.ordem_original = []
 
     def reiniciar_ids_estoque(self):
         try:
