@@ -12,7 +12,7 @@ def main():
     splash = tk.Tk()
     splash.overrideredirect(True)
 
-    splash_width = 400
+    splash_width  = 400
     splash_height = 300
     centralizar_janela(splash, splash_width, splash_height)
     splash.configure(background='#2C3E50')
