@@ -54,7 +54,7 @@ class Janela_Menu(tk.Tk):
         self._criar_menubar()
         self._criar_menu_lateral()
         self.configurar_estilos()
-         # cria barra de abas customizada (setas + canvas)
+        # cria barra de abas customizada (setas + canvas)
         self._criar_barra_abas()
 
         # Notebook sem abas nativas (usamos Hidden.TNotebook para esconder o header)
