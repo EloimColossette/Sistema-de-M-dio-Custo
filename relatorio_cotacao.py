@@ -15,6 +15,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_pdf import PdfPages
 import re
+import threading
 
 class CadastroProdutosApp:
     def __init__(self, root):
@@ -894,22 +895,52 @@ class CadastroProdutosApp:
             self.entradas[produto].delete(0, tk.END)
 
     def voltar(self):
-        """Fecha a janela de cadastro e reexibe o menu principal com atualização visual."""
-        # 1) Cancela qualquer callback agendado que manteria a janela viva
+        """Cancela callbacks, reexibe menu e destrói window em background."""
+        # cancela callback agendado, se houver
         if getattr(self, "_encerrar_id", None) is not None:
             try:
                 self.window.after_cancel(self._encerrar_id)
             except Exception:
                 pass
 
-        # 2) Fecha imediatamente a janela de cadastro
-        self.window.destroy()
+        # mostra o menu (root) antes de qualquer destruição
+        try:
+            self.root.deiconify()
+            self.root.state("zoomed")
+            self.root.lift()
+            self.root.update_idletasks()
+            try:
+                self.root.focus_force()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
-        # 3) Reexibe e atualiza o menu principal
-        self.root.deiconify()
-        self.root.state("zoomed")
-        self.root.lift()
-        self.root.update()
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    if hasattr(self.window, "after"):
+                        self.window.after(0, self.window.destroy)
+                    else:
+                        self.window.destroy()
+                except Exception:
+                    try:
+                        self.window.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
              
     def __del__(self):
         if hasattr(self, "conn"):

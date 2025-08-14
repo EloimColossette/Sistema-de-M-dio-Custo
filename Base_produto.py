@@ -7,6 +7,7 @@ import sys
 from logos import aplicar_icone
 from tkinter import filedialog
 import re
+import threading
 
 class InterfaceProduto:
     def __init__(self, janela_menu=None):
@@ -411,12 +412,38 @@ class InterfaceProduto:
             treeview.move(tree_id, '', index)
 
     def voltar_para_menu(self):
-        """Fecha a janela de base do produto e reexibe o menu principal com atualização visual."""
-        self.janela_base_produto.destroy()
-        self.janela_menu.deiconify()
-        self.janela_menu.state("zoomed")
-        self.janela_menu.lift()  # Garante que fique no topo
-        self.janela_menu.update()  # Força atualização visual
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
+        try:
+            self.janela_menu.deiconify()
+            self.janela_menu.state("zoomed")
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            self.janela_menu.focus_force()
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.after(0, self.janela_base_produto.destroy)
+                except Exception:
+                    try:
+                        self.janela_base_produto.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
         
     def on_closing(self):
         """Função para lidar com o fechamento da janela."""

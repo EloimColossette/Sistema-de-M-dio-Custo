@@ -11,6 +11,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import re
 from decimal import Decimal
+import threading
 
 class SistemaNF(tk.Toplevel):
     def __init__(self, janela_menu=None, master=None):
@@ -1505,12 +1506,43 @@ class SistemaNF(tk.Toplevel):
         self.atualizar_soma_selecionada(event)
 
     def voltar_para_menu(self):
-        """Fecha a janela atual e reexibe o menu principal com atualização visual."""
-        self.destroy()                           # Fecha a janela atual
-        self.janela_menu.deiconify()             # Reexibe a janela do menu
-        self.janela_menu.state("zoomed")         # Garante que fique maximizada
-        self.janela_menu.lift()                  # Garante que fique no topo
-        self.janela_menu.update()                # Força atualização visual
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear o mainloop."""
+        # 1) Reexibe e força redraw/foco do menu imediatamente
+        try:
+            self.janela_menu.deiconify()
+            self.janela_menu.state("zoomed")
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            self.janela_menu.focus_force()
+        except Exception:
+            pass
+
+        # 2) Fecha conexões e faz limpeza em thread separada para evitar congelamento da UI
+        def _cleanup_and_destroy():
+            try:
+                # fecha cursor/conn com segurança se existirem
+                if hasattr(self, "cursor") and self.cursor:
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and self.conn:
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                # destrói a janela na thread principal
+                try:
+                    self.after(0, self.destroy)
+                except Exception:
+                    # fallback: se after falhar, tenta destroy direto (raro)
+                    try:
+                        self.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
         
     def on_closing(self):
         """Fecha a janela e encerra o programa corretamente"""

@@ -1490,11 +1490,6 @@ class Janela_Menu(tk.Tk):
         except Exception:
             pass
 
-    def logout(self):
-        from login import TelaLogin
-        self.destroy()  # Fecha a janela de menu
-        TelaLogin().run()  # Cria e executa a tela de login
-
     def abrir_base_produtos(self):
         self.withdraw()
         from Base_produto import InterfaceProduto
@@ -1544,6 +1539,11 @@ class Janela_Menu(tk.Tk):
         self.withdraw()
         from registro_teste import RegistroTeste
         RegistroTeste(janela_menu=self, master=self)
+        
+    def logout(self):
+        from login import TelaLogin
+        self.destroy()  # Fecha a janela de menu
+        TelaLogin().run()  # Cria e executa a tela de login
         
     def carregar_janela(self, title, content):
         """Carrega conteúdo na área principal e restaura a janela do menu."""

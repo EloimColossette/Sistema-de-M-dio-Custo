@@ -9,6 +9,7 @@ import json
 import os
 import psycopg2
 import re
+import threading
 
 # Função para conectar ao banco de dados PostgreSQL
 class InterfaceMateriais:
@@ -461,12 +462,38 @@ class InterfaceMateriais:
         treeview.heading(coluna, command=lambda: self.ordena_coluna(treeview, coluna, not reverse))
 
     def voltar_para_menu(self):
-        """Fecha a janela de materiais e reexibe o menu principal com atualização visual."""
-        self.janela_materiais.destroy()
-        self.janela_menu.deiconify()
-        self.janela_menu.state("zoomed")
-        self.janela_menu.lift()  # Garante que fique no topo
-        self.janela_menu.update()  # Força atualização visual
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
+        try:
+            self.janela_menu.deiconify()
+            self.janela_menu.state("zoomed")
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            self.janela_menu.focus_force()
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.after(0, self.janela_materiais.destroy)
+                except Exception:
+                    try:
+                        self.janela_materiais.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
         
     def adicionar_fornecedor(self):
         novo_fornecedor = self.entry_novo_fornecedor.get().strip()

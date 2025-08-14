@@ -13,6 +13,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+import threading
 
 class RelatorioApp(tk.Toplevel):  # Herda de Toplevel
     def __init__(self, root):
@@ -291,22 +292,49 @@ class RelatorioApp(tk.Toplevel):  # Herda de Toplevel
                 tabela.insert("", tk.END, values=("", "", "", ""))  # Linha em branco entre os totais (opcional)
 
     def voltar(self):
-        """Fecha a janela atual e reexibe o menu principal com atualização visual."""
-        # Cancela callback agendado, se houver
+        """Cancela callbacks, reexibe menu e destrói a janela em background."""
+        # cancela callback agendado, se houver
         if getattr(self, "_encerrar_id", None) is not None:
             try:
                 self.after_cancel(self._encerrar_id)
             except Exception:
                 pass
 
-        # Fecha a janela atual antes de mostrar o menu
-        self.destroy()
+        # Reexibe o menu principal antes de fechar a janela atual
+        try:
+            self.master.deiconify()
+            self.master.state("zoomed")
+            self.master.lift()
+            self.master.update_idletasks()
+            try:
+                self.master.focus_force()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
-        # Reexibe o menu principal
-        self.master.deiconify()
-        self.master.state("zoomed")
-        self.master.lift()
-        self.master.update()
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.after(0, self.destroy)
+                except Exception:
+                    try:
+                        self.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
 
     def carregar_produtos_base(self):
         try:

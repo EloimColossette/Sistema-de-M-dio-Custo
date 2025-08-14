@@ -8,6 +8,7 @@ from aba_sudeste_media_custo import criar_media_custo_sudeste
 from aba_centro_oeste_media_custo import criar_media_aba_centro_oeste  
 from decimal import Decimal
 from exportacao import exportar_notebook_para_excel
+import threading
 
 # Função para conectar ao banco de dados
 def conectar_banco():
@@ -383,12 +384,44 @@ def calcular_media_total_20(conn):
 
 # Função para voltar ao menu
 def voltar_para_menu(janela_media_custo, main_window):
-    """Fecha a janela de média de custo e reexibe o menu principal com atualização visual."""
-    janela_media_custo.destroy()         # Fecha a janela atual
-    main_window.deiconify()              # Reexibe a janela principal
-    main_window.state("zoomed")          # Maximiza a janela principal
-    main_window.lift()                   # Garante que fique no topo
-    main_window.update()                 # Força atualização visual
+    """Reexibe o menu imediatamente e destrói janela_media_custo em background."""
+    try:
+        main_window.deiconify()
+        main_window.state("zoomed")
+        main_window.lift()
+        main_window.update_idletasks()
+        try:
+            main_window.focus_force()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    def _cleanup_and_destroy():
+        try:
+            if hasattr(janela_media_custo, "cursor") and getattr(janela_media_custo, "cursor"):
+                try:
+                    janela_media_custo.cursor.close()
+                except Exception:
+                    pass
+            if hasattr(janela_media_custo, "conn") and getattr(janela_media_custo, "conn"):
+                try:
+                    janela_media_custo.conn.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                if hasattr(janela_media_custo, "after"):
+                    janela_media_custo.after(0, janela_media_custo.destroy)
+                else:
+                    janela_media_custo.destroy()
+            except Exception:
+                try:
+                    janela_media_custo.destroy()
+                except Exception:
+                    pass
+
+    threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
    
 # Função para criar a janela de média de custo
 def criar_media_custo(font_size=12, main_window=None):

@@ -6,6 +6,7 @@ from logos import aplicar_icone
 from centralizacao_tela import centralizar_janela
 from conexao_db import conectar
 import psycopg2
+import threading
 
 class InterfaceUsuarios:
     # Dicionário para mapear nomes internos para rótulos amigáveis (opcional)
@@ -416,12 +417,65 @@ class InterfaceUsuarios:
             conn.close()
 
     def voltar_ao_menu(self):
-        """Fecha a janela de usuários e reexibe o menu principal com atualização visual."""
-        self.janela_menu.deiconify()             # Reexibe a janela do menu
-        self.janela_menu.state("zoomed")         # Garante que fique maximizada
-        self.janela_menu.lift()                  # Garante que fique no topo
-        self.janela_menu.update()                # Força atualização visual
-        self.janela_usuarios.destroy()           # Fecha a janela de usuários
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear o mainloop."""
+        try:
+            self.janela_menu.deiconify()
+            try:
+                self.janela_menu.state("zoomed")
+            except Exception:
+                pass
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            try:
+                self.janela_menu.focus_force()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                # tenta fechar cursor/conn no self.janela_usuarios (preferencial) ou em self (fallback)
+                child = getattr(self, "janela_usuarios", None) or self
+                if hasattr(child, "cursor") and getattr(child, "cursor"):
+                    try:
+                        child.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(child, "conn") and getattr(child, "conn"):
+                    try:
+                        child.conn.close()
+                    except Exception:
+                        pass
+                # também fechar se estiver em self diretamente
+                if child is not self:
+                    if hasattr(self, "cursor") and getattr(self, "cursor"):
+                        try:
+                            self.cursor.close()
+                        except Exception:
+                            pass
+                    if hasattr(self, "conn") and getattr(self, "conn"):
+                        try:
+                            self.conn.close()
+                        except Exception:
+                            pass
+            finally:
+                # destrói a janela filha na thread principal
+                try:
+                    if child is not None and hasattr(child, "after"):
+                        child.after(0, child.destroy)
+                    else:
+                        # fallback
+                        if child is not None:
+                            child.destroy()
+                except Exception:
+                    try:
+                        if child is not None:
+                            child.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
 
     def on_closing(self):
         """Fecha a janela e encerra o programa corretamente."""

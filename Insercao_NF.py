@@ -9,6 +9,7 @@ import json
 import os
 from logos import aplicar_icone
 from centralizacao_tela import centralizar_janela
+import threading
 
 class Janela_InsercaoNF(tk.Toplevel):
     # Arrumar a largura do treeview
@@ -1430,12 +1431,38 @@ class Janela_InsercaoNF(tk.Toplevel):
             messagebox.showerror("Erro", f"Erro ao excluir a linha: {e}")
 
     def voltar_para_menu(self):
-        """Fecha a janela atual e reexibe o menu principal com atualização visual."""
-        self.destroy()  # Fecha a janela atual
-        self.janela_menu.deiconify()
-        self.janela_menu.state("zoomed")
-        self.janela_menu.lift()  # Garante que fique no topo
-        self.janela_menu.update()  # Força atualização visual
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
+        try:
+            self.janela_menu.deiconify()
+            self.janela_menu.state("zoomed")
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            self.janela_menu.focus_force()
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.after(0, self.destroy)
+                except Exception:
+                    try:
+                        self.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
         
     def on_closing(self):
         """Fecha a janela e encerra o programa corretamente"""

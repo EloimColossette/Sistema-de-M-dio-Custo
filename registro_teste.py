@@ -7,6 +7,7 @@ from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 import re
 from centralizacao_tela import centralizar_janela
 import pandas as pd
+import threading
 
 class RegistroTeste(tk.Toplevel):
     def __init__(self, janela_menu=None, master=None):
@@ -662,15 +663,42 @@ class RegistroTeste(tk.Toplevel):
             entry.delete(0, tk.END)
 
     def voltar_para_menu(self):
-        self.destroy()
-        if self.janela_menu:
-            try:
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
+        try:
+            if getattr(self, "janela_menu", None):
                 self.janela_menu.deiconify()
                 self.janela_menu.state("zoomed")
                 self.janela_menu.lift()
-                self.janela_menu.update()
-            except Exception:
-                pass
+                self.janela_menu.update_idletasks()
+                try:
+                    self.janela_menu.focus_force()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                if hasattr(self, "cursor") and getattr(self, "cursor"):
+                    try:
+                        self.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(self, "conn") and getattr(self, "conn"):
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    self.after(0, self.destroy)
+                except Exception:
+                    try:
+                        self.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
 
     def on_closing(self):
         self.conn.close()

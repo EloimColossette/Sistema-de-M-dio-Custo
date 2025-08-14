@@ -10,6 +10,7 @@ from centralizacao_tela import centralizar_janela
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, date
 import unicodedata
+import threading
 
 class CalculoProduto:
     def __init__(self, janela_menu):
@@ -1361,12 +1362,39 @@ class CalculoProduto:
             messagebox.showerror("Erro", f"Erro ao reiniciar os IDs: {e}")
 
     def voltar_para_menu(self):
-        """Fecha janela atual e reexibe a janela principal com atualização visual."""
-        self.root.destroy()
-        self.janela_menu.deiconify()
-        self.janela_menu.state("zoomed")
-        self.janela_menu.lift()  # Garante que fique no topo
-        self.janela_menu.update()  # Força atualização visual
+        """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
+        try:
+            self.janela_menu.deiconify()
+            self.janela_menu.state("zoomed")
+            self.janela_menu.lift()
+            self.janela_menu.update_idletasks()
+            self.janela_menu.focus_force()
+        except Exception:
+            pass
+
+        def _cleanup_and_destroy():
+            try:
+                child = getattr(self, "root", None) or self
+                if hasattr(child, "cursor") and getattr(child, "cursor"):
+                    try:
+                        child.cursor.close()
+                    except Exception:
+                        pass
+                if hasattr(child, "conn") and getattr(child, "conn"):
+                    try:
+                        child.conn.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    child.after(0, child.destroy)
+                except Exception:
+                    try:
+                        child.destroy()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_cleanup_and_destroy, daemon=True).start()
         
     def on_closing(self):
         """Fecha a janela e encerra o programa corretamente"""

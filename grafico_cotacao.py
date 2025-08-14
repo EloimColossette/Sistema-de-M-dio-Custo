@@ -667,7 +667,6 @@ class AplicacaoGrafico(tk.Frame):
         self.atualizar_estatisticas()
         self.atualizar_legenda()
 
-
     def formatar_produto(self, nome):
         nome = nome.lower().replace(" ", "_")
         nome_formatado = nome.replace("_", " ").title()
