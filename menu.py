@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox,Toplevel, Label
+from tkinter import ttk, messagebox
 from logos import aplicar_icone
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -16,7 +16,6 @@ import mplcursors
 from datetime import datetime
 import pandas as pd
 import importlib
-import threading
 import queue
 import traceback
 
