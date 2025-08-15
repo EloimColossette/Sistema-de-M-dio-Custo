@@ -1591,7 +1591,6 @@ class Janela_Menu(tk.Tk):
                     pass
         threading.Thread(target=w, daemon=True).start()
 
-    # ---- substituições das suas funções abrir_* para usar _open_async ----
     def abrir_base_produtos(self):
         self._open_async("Base_produto", "InterfaceProduto")
 
@@ -1625,7 +1624,6 @@ class Janela_Menu(tk.Tk):
         # exemplo com kwargs específicos
         self._open_async("registro_teste", "RegistroTeste", init_args=(), init_kwargs={"janela_menu": self, "master": self})
 
-    # logout e carregar_janela mantém o mesmo comportamento
     def logout(self):
         from login import TelaLogin
         self.destroy()  # Fecha a janela de menu
