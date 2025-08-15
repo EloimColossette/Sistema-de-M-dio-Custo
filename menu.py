@@ -36,7 +36,8 @@ class Janela_Menu(tk.Tk):
         # Inicia a thread de escuta
         self.encerrar = False  # <- define antes de iniciar escuta
         self.atualizacao_pendente = False
-        threading.Thread(target=self._escutar_notificacoes, daemon=True).start()
+        self._thread_escuta = threading.Thread(target=self._escutar_notificacoes, daemon=True)
+        self._thread_escuta.start()
 
         self.permissoes = self.carregar_permissoes_usuario(user_id)
         self.user_name = self.carregar_nome_usuario(user_id)
@@ -57,17 +58,29 @@ class Janela_Menu(tk.Tk):
         self._criar_menubar()
         self._criar_menu_lateral()
         self.configurar_estilos()
+
         # cria barra de abas customizada (setas + canvas)
         self._criar_barra_abas()
 
-        # Notebook sem abas nativas (usamos Hidden.TNotebook para esconder o header)
+        # cria o notebook
         self.notebook = ttk.Notebook(self.main_content, style="Hidden.TNotebook")
         self.notebook.pack(fill="both", expand=True)
 
-        # cria abas padrão
-        self._criar_abas()
+        # cria abas mínimas (placeholder)
+        self._criar_abas_minimal()
+        self.update_idletasks()  # garante que o placeholder apareça rápido
 
-        # sincroniza a barra custom com as abas criadas
+        # agenda carregamento pesado em segundo plano
+        def _carregar_abas_pesadas():
+            try:
+                # chama a versão pesada depois que a janela já estiver visível
+                self.after(0, self._criar_abas)
+            except Exception as e:
+                print("Erro ao carregar abas:", e)
+
+        threading.Thread(target=_carregar_abas_pesadas, daemon=True).start()
+
+        # sincroniza barra de abas
         self._atualizar_barra_abas()
 
         # --- adiciona o prewarm aqui (opção imediata) ---
@@ -332,6 +345,29 @@ class Janela_Menu(tk.Tk):
             self.notebook.add(self.frame_ultimos_registros_teste, text="Últimos Registros de Teste")
             self.criar_aba_ultimos_registros_teste()
 
+    def _criar_abas_minimal(self):
+        self.frame_placeholder = tk.Frame(self.notebook, bg="#ecf0f1")
+        self.notebook.add(self.frame_placeholder, text="Carregando...")
+
+        self.spinner_label = tk.Label(
+            self.frame_placeholder,
+            text="⠋ Carregando...",
+            font=("Segoe UI", 14),
+            bg="#ecf0f1"
+        )
+        self.spinner_label.pack(pady=50)
+
+        self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._spinner_index = 0
+        self._atualizar_spinner()
+
+    def _atualizar_spinner(self):
+        self.spinner_label.config(
+            text=f"{self._spinner_frames[self._spinner_index]} Carregando..."
+        )
+        self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
+        self._spinner_job = self.after(100, self._atualizar_spinner)  # salva o job
+
     def configurar_estilos(self):
         """Configura os estilos do ttk para Notebook e Treeview."""
         style = ttk.Style(self)
@@ -486,16 +522,20 @@ class Janela_Menu(tk.Tk):
     def _escutar_notificacoes(self):
         try:
             while not self.encerrar:
-                select.select([self.conn_listen], [], [], 1)  # timeout de 1 segundo evita travamento no fechamento
-                self.conn_listen.poll()
-                while self.conn_listen.notifies:
-                    notify = self.conn_listen.notifies.pop(0)
-                    print(f"[NOTIFY] {notify.channel}: {notify.payload}")
-                    if not self.atualizacao_pendente and self.winfo_exists():
-                        self.atualizacao_pendente = True
-                        self.after(100, self.atualizar_pagina)
-        except Exception as e:
-            print(f"[Erro na escuta]: {e}")
+                try:
+                    select.select([self.conn_listen], [], [], 1)
+                    self.conn_listen.poll()
+                    while self.conn_listen.notifies:
+                        notify = self.conn_listen.notifies.pop(0)
+                        print(f"[NOTIFY] {notify.channel}: {notify.payload}")
+                        if not self.atualizacao_pendente and self.winfo_exists():
+                            self.atualizacao_pendente = True
+                            self.after(100, self.atualizar_pagina)
+                except Exception as e:
+                    if not self.encerrar:  # ignora erros se for fechamento
+                        print(f"[Erro na escuta]: {e}")
+        except Exception as e_outer:
+            print(f"[Erro crítico na thread de escuta]: {e_outer}")
 
     def atualizar_pagina(self):
         try:
@@ -1643,10 +1683,25 @@ class Janela_Menu(tk.Tk):
         if messagebox.askyesno("Fechar", "Tem certeza que deseja fechar esta janela?"):
             print("Fechando o programa corretamente...")
 
-            self.encerrar = True  # sinaliza para o loop de escuta encerrar
+            # Sinaliza para a thread de escuta encerrar
+            self.encerrar = True
 
+            # Espera a thread encerrar (opcional, mas mais seguro)
+            if hasattr(self, "_thread_escuta") and self._thread_escuta.is_alive():
+                self._thread_escuta.join(timeout=1)  # espera até 1 segundo
+
+            # Cancela spinner
+            if hasattr(self, "_spinner_job"):
+                self.after_cancel(self._spinner_job)
+
+            # Fecha conexões
             if hasattr(self, "conn") and self.conn:
                 self.conn.close()
                 print("Conexão com o banco de dados fechada.")
 
+            if hasattr(self, "conn_listen") and self.conn_listen:
+                self.conn_listen.close()
+                print("Conexão de listen fechada.")
+
+            # Fecha a janela
             self.destroy()

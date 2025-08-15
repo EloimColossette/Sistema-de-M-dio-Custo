@@ -828,110 +828,109 @@ class Janela_InsercaoNF(tk.Toplevel):
             janela.geometry(f'{largura_janela}x{altura_janela}+{x}+{y}')
 
         # Configurar tamanho e centralizar a janela
-        janela_inserir.geometry("1200x600")
+        janela_inserir.geometry("1000x600")
         janela_inserir.update_idletasks()
         centralizar_janela3(janela_inserir)
 
         # Definir fundo e estilos padronizados
         janela_inserir.configure(bg="#ecf0f1")
 
+        # Fonte dos títulos das entradas (reduzida)
+        LABEL_FONT = ("Arial", 9, "bold")
+
         # Criar uma variável para o campo de data
         data_var = tk.StringVar()
 
-        # Função para formatar a data (executada quando o campo perde o foco)
+        # Função para formatar a data
         def formatar_data(event=None):
             data = data_var.get().strip()
-            # Remove qualquer caractere que não seja número
             data = ''.join(filter(str.isdigit, data))
-            # Se a data tiver mais de 8 caracteres, mantém apenas os 8 primeiros
             if len(data) > 8:
                 data = data[:8]
-            # Se tiver 8 dígitos, formata para dd/mm/aaaa
             if len(data) == 8:
                 data = data[:2] + '/' + data[2:4] + '/' + data[4:8]
             data_var.set(data)
 
-        # Cria um estilo exclusivo para essa janela
+        # Estilos exclusivos para essa janela
         style = ttk.Style(janela_inserir)
         style.theme_use("alt")
-        style.configure("Inserir.TCombobox",
-                        padding=5,
-                        relief="flat",
-                        background="#ecf0f1",
-                        font=("Arial", 10))
-        style.configure("Inserir.TEntry",
-                        padding=5,
-                        relief="solid",
-                        background="#ecf0f1",
-                        font=("Arial", 10))
+        style.configure("Inserir.TCombobox", padding=5, relief="flat",
+                        background="#ecf0f1", font=("Arial", 10))
+        style.configure("Inserir.TEntry", padding=5, relief="solid",
+                        background="#ecf0f1", font=("Arial", 10))
 
-        # Título da janela com cabeçalho profissional
-        titulo = tk.Label(janela_inserir, text="Inserir Nova Linha", bg="#34495e", fg="white",
+        # Título da janela
+        titulo = tk.Label(janela_inserir, text="Inserir Nova Linha",
+                        bg="#34495e", fg="white",
                         font=("Arial", 16, "bold"))
-        titulo.pack(fill=tk.X, pady=(0,10))
+        titulo.pack(fill=tk.X, pady=(0, 10))
 
-        # Frame principal para os campos com fundo uniforme
+        # Frame principal
         frame_campos = tk.Frame(janela_inserir, bg="#ecf0f1")
         frame_campos.pack(padx=15, pady=15, fill=tk.BOTH, expand=True)
 
-        # Carregando dados de fornecedores, materiais e produtos
+        # Carregar dados
         fornecedores = self.carregar_fornecedores_materiais("fornecedor")
         materiais = self.carregar_fornecedores_materiais("material")
 
-        # Lista de títulos amigáveis (na mesma ordem das colunas visíveis)
+        # Lista de títulos amigáveis
         titulos_amigaveis_visiveis = [self.colunas_fixas[col] for col in self.colunas_visiveis]
 
-        # Organiza as entradas em um grid com três colunas de campos
+        # Organiza em três colunas
         num_colunas = 3
         self.entries = {}
         for i, titulo_text in enumerate(titulos_amigaveis_visiveis):
             linha = i // num_colunas
             coluna = i % num_colunas
 
-            # Label do campo
+            # Label com fonte reduzida
             label = tk.Label(frame_campos, text=titulo_text, bg="#ecf0f1",
-                            font=("Arial", 10, "bold"))
+                            font=LABEL_FONT)
             label.grid(row=linha, column=coluna * 2, padx=10, pady=8, sticky="e")
 
-            # Escolhe o widget adequado
+            # Escolha do widget
             if titulo_text == "Fornecedor":
                 fornecedores = sorted(self.carregar_fornecedores_materiais("fornecedor"))
-                entry = ttk.Combobox(frame_campos, values=[""] + fornecedores, style="Inserir.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + fornecedores,
+                                    style="Inserir.TCombobox", width=22, state="readonly")
             elif titulo_text.startswith("Material"):
                 materiais = sorted(self.carregar_fornecedores_materiais("material"))
-                entry = ttk.Combobox(frame_campos, values=[""] + materiais, style="Inserir.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + materiais,
+                                    style="Inserir.TCombobox", width=22, state="readonly")
             elif titulo_text == "Produto":
                 produtos = sorted(self.carregar_produtos())
-                entry = ttk.Combobox(frame_campos, values=[""] + produtos, style="Inserir.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + produtos,
+                                    style="Inserir.TCombobox", width=22, state="readonly")
             elif titulo_text == "Data":
-                # Cria o campo de data associando a variável data_var
-                entry = ttk.Entry(frame_campos, textvariable=data_var, style="Inserir.TEntry", width=24)
-                # Quando o campo perde o foco, a função formatar_data é chamada
+                entry = ttk.Entry(frame_campos, textvariable=data_var,
+                                style="Inserir.TEntry", width=24)
                 entry.bind("<FocusOut>", formatar_data)
             else:
                 entry = ttk.Entry(frame_campos, style="Inserir.TEntry", width=24)
-                # Corrigido: usa titulo_text (string) ao invés de widget
                 if any(k in titulo_text for k in ("Valor", "Duplicata", "Peso", "Custo Empresa", "IPI")):
                     casas = 3 if "Peso" in titulo_text else 2
                     entry.bind("<KeyRelease>", lambda e, c=casas: self.formatar_numero(e, c))
+
             entry.grid(row=linha, column=coluna * 2 + 1, padx=10, pady=8)
             self.entries[titulo_text] = entry
 
-        # Frame para os botões de ação
+        # Frame para botões
         frame_botoes = tk.Frame(janela_inserir, bg="#ecf0f1")
         frame_botoes.pack(pady=20)
 
         btn_confirmar = tk.Button(frame_botoes, text="Confirmar",
                                 command=lambda: self.confirmar_inserir(janela_inserir),
-                                bg="#27ae60", fg="white", font=("Arial", 12, "bold"), width=15)
+                                bg="#27ae60", fg="white",
+                                font=("Arial", 12, "bold"), width=15)
         btn_confirmar.grid(row=0, column=0, padx=10)
 
         btn_cancelar = tk.Button(frame_botoes, text="Cancelar",
                                 command=janela_inserir.destroy,
-                                bg="#c0392b", fg="white", font=("Arial", 12, "bold"), width=15)
+                                bg="#c0392b", fg="white",
+                                font=("Arial", 12, "bold"), width=15)
         btn_cancelar.grid(row=0, column=1, padx=10)
 
-        # Distribuir igualmente as colunas para um layout equilibrado
+        # Ajuste de colunas
         for coluna in range(num_colunas * 2):
             frame_campos.grid_columnconfigure(coluna, weight=1)
 
@@ -1081,16 +1080,14 @@ class Janela_InsercaoNF(tk.Toplevel):
 
         item_id = item_selecionado[0]
         valores_atualizados = self.tree.item(item_id, 'values')
+        nf_original = valores_atualizados[1]  # NF é o segundo valor
 
-        # Supondo que o número da NF seja o segundo valor (índice 1)
-        nf_original = valores_atualizados[1]
-
-        # Cria uma nova janela para editar
+        # Cria a janela
         janela_editar = tk.Toplevel(self)
         janela_editar.title("Editar Linha")
         aplicar_icone(janela_editar, self.caminho_icone)
 
-        # Função auxiliar para centralizar a janela
+        # Centralizar janela
         def centralizar_janela(janela):
             janela.update_idletasks()
             largura_janela = janela.winfo_width()
@@ -1101,94 +1098,72 @@ class Janela_InsercaoNF(tk.Toplevel):
             y = (altura_tela // 2) - (altura_janela // 2)
             janela.geometry(f'{largura_janela}x{altura_janela}+{x}+{y}')
 
-        # Configurar o tamanho da janela e centralizá-la
-        janela_editar.geometry("1200x600")
+        janela_editar.geometry("1000x600")
         janela_editar.update_idletasks()
         centralizar_janela(janela_editar)
 
-        # Definindo fundo e estilos para uma aparência profissional
         janela_editar.configure(bg="#ecf0f1")
-        
-        # Cria estilos exclusivos para esta janela
+
+        # Fonte dos títulos
+        LABEL_FONT = ("Arial", 9, "bold")
+
+        # Estilos
         style = ttk.Style(janela_editar)
         style.theme_use("alt")
-        style.configure("Editar.TCombobox",
-                        padding=5,
-                        relief="flat",
-                        background="#ecf0f1",
-                        font=("Arial", 10))
-        style.configure("Editar.TEntry",
-                        padding=5,
-                        relief="solid",
-                        background="#ecf0f1",
-                        font=("Arial", 10))
-        
+        style.configure("Editar.TCombobox", padding=5, relief="flat",
+                        background="#ecf0f1", font=("Arial", 10))
+        style.configure("Editar.TEntry", padding=5, relief="solid",
+                        background="#ecf0f1", font=("Arial", 10))
+
         # Função para formatar a data
         def formatar_data(event=None):
-            """Formata a data para dd/mm/aaaa enquanto o usuário digita."""
             data = event.widget.get().strip()
-
-            # Remove qualquer caracter que não seja número
             data = ''.join(filter(str.isdigit, data))
-
-            # Se a data tiver mais de 8 caracteres (depois de limpar), mantém apenas os 8 primeiros
             if len(data) > 8:
                 data = data[:8]
-
-            # Formata a data
             if len(data) == 8:
                 data = data[:2] + '/' + data[2:4] + '/' + data[4:8]
-
-            # Atualiza o campo de entrada com a data formatada
             event.widget.delete(0, tk.END)
             event.widget.insert(0, data)
 
-        # Cabeçalho da janela
+        # Título
         titulo = tk.Label(janela_editar, text="Editar Linha", bg="#34495e", fg="white",
                         font=("Arial", 16, "bold"))
-        titulo.pack(fill=tk.X, pady=(0,10))
+        titulo.pack(fill=tk.X, pady=(0, 10))
 
-        # Frame principal para os campos
+        # Frame principal
         frame_campos = tk.Frame(janela_editar, bg="#ecf0f1")
         frame_campos.pack(padx=15, pady=15, fill=tk.BOTH, expand=True)
 
-        # Lista de títulos amigáveis (usados para as colunas visíveis)
-        titulos_amigaveis = [
-            "Data", "NF", "Fornecedor", "Material 1", "Material 2", "Material 3", "Material 4", "Material 5",
-            "Produto", "Custo Empresa", "IPI", "Valor Integral", "Valor Unitário 1", "Valor Unitário 2", "Valor Unitário 3",
-            "Valor Unitário 4", "Valor Unitário 5", "Duplicata 1", "Duplicata 2", "Duplicata 3", "Duplicata 4",
-            "Duplicata 5", "Duplicata 6", "Valor Unitário Energia", "Valor Mão de Obra TM/Metallica", "Peso Líquido", "Peso Integral"
-        ]
-        # Usar somente os títulos das colunas visíveis
+        # Colunas visíveis
         titulos_amigaveis_visiveis = [self.colunas_fixas[col] for col in self.colunas_visiveis]
 
-        # Carregar dados adicionais para os combobox
+        # Carregar listas para combobox
         fornecedores = self.carregar_fornecedores_materiais("fornecedor")
         materiais = self.carregar_fornecedores_materiais("material")
         produtos = self.carregar_produtos()
 
-        num_colunas = 3  # Número de entradas por linha
+        num_colunas = 3
         self.entries_edit = {}
 
         for i, titulo_text in enumerate(titulos_amigaveis_visiveis):
             linha = i // num_colunas
             coluna = i % num_colunas
 
-            # Label do campo
-            label = tk.Label(frame_campos, text=titulo_text, bg="#ecf0f1", font=("Arial", 10, "bold"))
+            # Label com fonte reduzida
+            label = tk.Label(frame_campos, text=titulo_text, bg="#ecf0f1", font=LABEL_FONT)
             label.grid(row=linha, column=coluna * 2, padx=10, pady=8, sticky="e")
 
-            # Escolha o widget adequado para o campo com estilos exclusivos
+            # Escolhe widget
             if titulo_text == "Fornecedor":
                 fornecedores = sorted(self.carregar_fornecedores_materiais("fornecedor"))
-                entry = ttk.Combobox(frame_campos, values=[""] + fornecedores, style="Editar.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + fornecedores,
+                                    style="Editar.TCombobox", width=22, state="readonly")
                 entry.set(valores_atualizados[i])
             elif titulo_text == "IPI":
                 entry = ttk.Entry(frame_campos, style="Editar.TEntry", width=24)
-                # Insere valor inicial trocando ponto por vírgula
                 valor_ipi = valores_atualizados[i]
                 entry.insert(0, valor_ipi.replace('.', ','))
-                # Formata automaticamente com 2 casas decimais enquanto digita
                 entry.bind("<KeyRelease>", lambda e, c=2: self.formatar_numero(e, c))
             elif titulo_text in ("Peso Líquido", "Peso Integral"):
                 entry = ttk.Entry(frame_campos, style="Editar.TEntry", width=24)
@@ -1202,28 +1177,29 @@ class Janela_InsercaoNF(tk.Toplevel):
                 entry.bind("<KeyRelease>", lambda e: self.formatar_numero(e, 3))
             elif titulo_text.startswith("Material"):
                 materiais = sorted(self.carregar_fornecedores_materiais("material"))
-                entry = ttk.Combobox(frame_campos, values=[""] + materiais, style="Editar.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + materiais,
+                                    style="Editar.TCombobox", width=22, state="readonly")
                 entry.set(valores_atualizados[i])
             elif titulo_text == "Produto":
                 produtos = sorted(self.carregar_produtos())
-                entry = ttk.Combobox(frame_campos, values=[""] + produtos, style="Editar.TCombobox", width=22, state="readonly")
+                entry = ttk.Combobox(frame_campos, values=[""] + produtos,
+                                    style="Editar.TCombobox", width=22, state="readonly")
                 entry.set(valores_atualizados[i])
             elif titulo_text == "Data":
-                # A função de formatação de data é vinculada ao evento de digitação
                 entry = ttk.Entry(frame_campos, width=24)
                 entry.insert(0, valores_atualizados[i])
-                entry.bind("<KeyRelease>", formatar_data)  # Aplica formatação enquanto digita
+                entry.bind("<KeyRelease>", formatar_data)
             else:
                 entry = ttk.Entry(frame_campos, style="Editar.TEntry", width=24)
                 entry.insert(0, valores_atualizados[i])
                 if any(k in titulo_text for k in ("Valor", "Duplicata", "Peso", "Custo Empresa", "IPI")):
                     casas = 3 if "Peso" in titulo_text else 2
                     entry.bind("<KeyRelease>", lambda e, c=casas: self.formatar_numero(e, c))
-            
+
             entry.grid(row=linha, column=coluna * 2 + 1, padx=10, pady=8)
             self.entries_edit[titulo_text] = entry
 
-        # Frame para botões de ação
+        # Botões
         frame_botoes = tk.Frame(janela_editar, bg="#ecf0f1")
         frame_botoes.pack(pady=20)
 
@@ -1237,7 +1213,6 @@ class Janela_InsercaoNF(tk.Toplevel):
                                 bg="#c0392b", fg="white", font=("Arial", 12, "bold"), width=15)
         btn_cancelar.grid(row=0, column=1, padx=10)
 
-        # Ajusta a proporção das colunas para um layout equilibrado
         for coluna in range(num_colunas * 2):
             frame_campos.grid_columnconfigure(coluna, weight=1)
 

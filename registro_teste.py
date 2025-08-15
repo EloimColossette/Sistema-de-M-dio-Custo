@@ -16,15 +16,22 @@ class RegistroTeste(tk.Toplevel):
         self.title("Registro de Teste")
         self.config(bg="#f4f4f4")
 
-        # Fonte e Ícone
+        # Fonte local
         fixed_font = tkfont.Font(family="Arial", size=10)
-        self.option_add("*Font", fixed_font)
+
         aplicar_icone(self, r"C:\Sistema\logos\Kametal.ico")
 
         # Tamanho
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{int(sw*0.8)}x{int(sh*0.8)}")
         self.state("zoomed")
+
+        # Estilo local por instância (isolado) – removemos estilos de botão
+        self._prefix = f"Reg{abs(id(self))}"
+        self.style = ttk.Style(self)
+        self.style.configure(f"{self._prefix}.TLabel", font=("Arial", 10))
+        self.style.configure(f"{self._prefix}.TFrame", background=self.cget("bg"))
+        self.style.configure(f"{self._prefix}.Treeview", rowheight=18)
 
         # Conexão DB
         try:
@@ -36,90 +43,72 @@ class RegistroTeste(tk.Toplevel):
             return
 
         # Montagem da UI
-        self.create_widgets()
+        self.create_widgets(fixed_font=fixed_font)
         self.atualizar_treeview()
         self.configure_treeview()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def create_widgets(self):
+    def create_widgets(self, fixed_font=None):
+        if fixed_font is None:
+            fixed_font = ("Arial", 10)
+
+        # largura padrão para todos os campos
+        ENTRY_WIDTH = 25  
+
         main = tk.Frame(self, bg="#f4f4f4")
         main.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # 1) Barra de pesquisa
+        # Barra de pesquisa
         search_frame = tk.Frame(main, bg="#f4f4f4")
         search_frame.pack(fill="x", pady=(0,10), padx=10)
-        tk.Label(search_frame, text="Pesquisar:", bg="#f4f4f4").pack(side="left")
+        tk.Label(search_frame, text="Pesquisar:", bg="#f4f4f4", font=fixed_font).pack(side="left")
 
-        # entry sem StringVar, vamos usá‑lo diretamente
-        self.search_entry = tk.Entry(search_frame, width=25)
+        self.search_entry = tk.Entry(search_frame, width=ENTRY_WIDTH, font=fixed_font)
         self.search_entry.pack(side="left", fill="x", expand=False, padx=(5,0))
-        # a cada tecla, passa o texto para o filtro
         self.search_entry.bind("<KeyRelease>", lambda ev: self._filter_rows(ev.widget.get()))
 
-        # Botão Exportar Excel acima da Treeview, alinhado à direita
-        export_btn = ttk.Button(search_frame, text="Exportar Excel", command=self.abrir_dialogo_exportacao, width=15, style="Mini.TButton")
-        export_btn.pack(side="right")
+        # Botão Exportar Excel
+        tk.Button(search_frame, text="Exportar Excel", command=self.abrir_dialogo_exportacao, width=15)\
+            .pack(side="right")
 
+        # Formulário
         form = tk.LabelFrame(main, text="Dados do Registro", bg="#f4f4f4", padx=10, pady=10)
         form.pack(fill="x", padx=10, pady=10)
 
         labels = [
-            "Data", 
-            "Código de Barras", 
-            "O.P.", 
-            "Cliente", 
-            "Material",
-            "Liga", 
-            "Dimensões", 
-            "Área", 
-            "L.R. Tração (N)", 
-            "L.R. Tração (MPa)", 
-            "Alongamento (%)", 
-            "Tempera", 
-            "Máquina", 
-            "Empresa"
+            "Data", "Código de Barras", "O.P.", "Cliente", "Material", "Liga", "Dimensões",
+            "Área", "L.R. Tração (N)", "L.R. Tração (MPa)", "Alongamento (%)", "Tempera",
+            "Máquina", "Empresa"
         ]
 
         self.entries = {}
         for i, lbl in enumerate(labels):
             row, col = divmod(i, 3)
-            tk.Label(form, text=lbl + ":", bg="#f4f4f4")\
-              .grid(row=row, column=col*2, sticky="e", padx=5, pady=5)
+            tk.Label(form, text=lbl + ":", bg="#f4f4f4", font=fixed_font)\
+            .grid(row=row, column=col*2, sticky="e", padx=5, pady=5)
 
-            # 1) Cria o Entry em 'e' SEMPRE
-            e = tk.Entry(form, width=15)
+            e = tk.Entry(form, width=ENTRY_WIDTH, font=fixed_font)
 
-            # 2) Se for Data, guarda e bind
             if lbl == "Data":
                 self.date_entry = e
                 e.bind("<KeyRelease>", self._on_date_key)
-
-            # 3) Se for Alongamento (%), guarda e bind
             elif lbl == "Alongamento (%)":
                 self.along_entry = e
                 e.bind("<KeyRelease>", self._on_along_key)
-
-             # Dimensões (decimal automático)
             elif lbl == "Dimensões":
                 self.dim_entry = e
                 e.bind("<KeyRelease>", lambda ev, en=e: self._on_decimal_key(ev, en))
-
-            # Área (decimal automático)
             elif lbl == "Área":
                 self.area_entry = e
                 e.bind("<KeyRelease>", lambda ev, en=e: self._on_decimal_key(ev, en))
-
             elif lbl == "Tempera":
                 self.temper_entry = e
                 e.bind("<KeyRelease>", self._on_tempera_key)
 
-            # 4) Grida e armazena em entries
             e.grid(row=row, column=col*2+1, sticky="w", padx=5, pady=5)
             self.entries[lbl] = e
 
         # Botões
-        style = ttk.Style(self)
-        style.configure("Mini.TButton", font=("Arial",10), padding=(2,1))
         btn_frame = tk.Frame(main, bg="#f4f4f4")
         btn_frame.pack(pady=5)
         for text, cmd in [
@@ -127,10 +116,11 @@ class RegistroTeste(tk.Toplevel):
             ("Excluir", self.excluir), ("Limpar", self.limpar),
             ("Voltar", self.voltar_para_menu)
         ]:
-            ttk.Button(btn_frame, text=text, command=cmd, width=15, style="Mini.TButton").pack(side="left", padx=3)
+            tk.Button(btn_frame, text=text, command=cmd, width=15)\
+            .pack(side="left", padx=3)
 
         # Treeview
-        tree_frame = tk.Frame(main)
+        tree_frame = tk.Frame(main, bg="#f4f4f4")
         tree_frame.pack(fill="both", expand=True, pady=(10,0))
         vsb = tk.Scrollbar(tree_frame, orient="vertical")
         hsb = tk.Scrollbar(tree_frame, orient="horizontal")
@@ -138,7 +128,9 @@ class RegistroTeste(tk.Toplevel):
         hsb.pack(side="bottom", fill="x")
 
         cols = labels[:]
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings",yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
+                                yscrollcommand=vsb.set, xscrollcommand=hsb.set,
+                                style=f"{self._prefix}.Treeview")
         vsb.config(command=self.tree.yview)
         hsb.config(command=self.tree.xview)
         self.tree.pack(side="left", fill="both", expand=True)

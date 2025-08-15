@@ -9,6 +9,7 @@ import customtkinter as ctk
 from conexao_db import conectar
 import json
 import os
+import threading, importlib
 
 class TelaLogin:
     def __init__(self):
@@ -124,7 +125,21 @@ class TelaLogin:
 
         # Garante que o "X" da janela feche corretamente
         self.janela_login.protocol("WM_DELETE_WINDOW", self.on_closing)
-    
+
+        def _prewarm_app_modules():
+            modules = [
+                "Base_produto", "Base_material", "Saida_NF", "Insercao_NF",
+                "usuario", "Estoque", "media_custo", "relatorio_saida",
+                "relatorio_cotacao", "registro_teste"
+            ]
+            for m in modules:
+                try:
+                    importlib.import_module(m)
+                except Exception:
+                    pass  # ignora erros silenciosamente
+
+        threading.Thread(target=_prewarm_app_modules, daemon=True).start()
+
     def solicitar_nova_senha(self, user_id, usuario):
         # Cria a janela para alteração de senha usando CTkToplevel
         tela_alteracao = ctk.CTkToplevel(self.janela_login)
