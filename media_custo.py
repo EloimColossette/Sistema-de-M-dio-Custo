@@ -425,6 +425,8 @@ def voltar_para_menu(janela_media_custo, main_window):
    
 # Função para criar a janela de média de custo
 def criar_media_custo(font_size=12, main_window=None):
+    if main_window:  # se a janela principal foi passada
+        main_window.withdraw()  # Oculta a janela menu
     user_id = main_window.user_id  # recupera o user_id do main_window
     conn = conectar_banco()  # Conecta ao banco de dados aqui
     if not conn:

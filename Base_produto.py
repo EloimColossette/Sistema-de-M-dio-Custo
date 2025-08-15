@@ -120,7 +120,9 @@ class InterfaceProduto:
 
         self.janela_base_produto.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        self.janela_base_produto.mainloop()
+        # Oculta o menu ao abrir
+        if self.janela_menu is not None:
+            self.janela_menu.withdraw()
 
     def _configurar_estilo_produto(self):
         """Configura os estilos para a janela de produtos."""

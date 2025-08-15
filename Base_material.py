@@ -72,6 +72,10 @@ class InterfaceMateriais:
             lambda ev, ent=self.entry_valor: self._formatar_numero(ent, casas=4)
         )
 
+        # oculta menu ao abrir
+        if self.janela_menu is not None:
+            self.janela_menu.withdraw()
+
         tk.Label(frame_acoes, text="Grupo", bg="#ecf0f1", font=("Arial", 12)) .grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.combobox_grupo = ttk.Combobox(frame_acoes, values=["Cobre", "Zinco", "Sucata"], state="readonly", font=("Arial", 12), width=23)
         self.combobox_grupo.grid(row=3, column=1, padx=5, pady=5)

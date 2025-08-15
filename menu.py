@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox,Toplevel, Label
 from logos import aplicar_icone
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -15,6 +15,10 @@ import seaborn as sns
 import mplcursors
 from datetime import datetime
 import pandas as pd
+import importlib
+import threading
+import queue
+import traceback
 
 class Janela_Menu(tk.Tk):
     def __init__(self, user_id):
@@ -66,6 +70,13 @@ class Janela_Menu(tk.Tk):
 
         # sincroniza a barra custom com as abas criadas
         self._atualizar_barra_abas()
+
+        # --- adiciona o prewarm aqui (opção imediata) ---
+        self.prewarm_modules([
+            "Base_produto", "Base_material", "Saida_NF", "Insercao_NF",
+            "usuario", "Estoque", "media_custo", "relatorio_saida",
+            "relatorio_cotacao", "registro_teste"
+        ])
 
         # Atualiza estilos ao recuperar o foco e fecha o programa corretamente
         self.bind("<FocusIn>", lambda e: self.configurar_estilos())
@@ -1490,61 +1501,136 @@ class Janela_Menu(tk.Tk):
         except Exception:
             pass
 
+    def _open_async(self, module_name: str, attr_name: str = None,
+                is_func: bool = False,
+                init_args: tuple = None, init_kwargs: dict = None,
+                hide_menu_after_open: bool = True):
+        """
+        Importa module_name (e pega attr_name) em thread background.
+        Quando pronto, na thread principal instancia/chama o atributo.
+        """
+        init_args = tuple(init_args or ())
+        init_kwargs = dict(init_kwargs or {})
+
+        q = queue.Queue()
+
+        def worker():
+            try:
+                mod = importlib.import_module(module_name)
+                target = getattr(mod, attr_name) if attr_name else mod
+                q.put(("ok", target))
+            except Exception:
+                q.put(("err", traceback.format_exc()))
+
+        # opcional: mudar cursor para busy
+        try:
+            self.config(cursor="watch")
+        except Exception:
+            pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def check():
+            try:
+                status, payload = q.get_nowait()
+            except queue.Empty:
+                self.after(80, check)
+                return
+
+            # reset cursor
+            try:
+                self.config(cursor="")
+            except Exception:
+                pass
+
+            if status == "err":
+                messagebox.showerror(
+                    "Erro ao abrir",
+                    f"Falha ao carregar {module_name}:\n\n{payload}"
+                )
+                return
+
+            target = payload
+            try:
+                if is_func:
+                    target(*init_args, **init_kwargs)
+                else:
+                    try:
+                        if len(init_args) == 0:
+                            target(self)
+                        else:
+                            target(*init_args, **init_kwargs)
+                    except TypeError:
+                        target(self, *init_args, **init_kwargs)
+
+                if hide_menu_after_open:
+                    try:
+                        self.withdraw()
+                    except Exception:
+                        pass
+            except Exception:
+                messagebox.showerror(
+                    "Erro ao abrir",
+                    f"Falha ao instanciar {attr_name or module_name}:\n\n{traceback.format_exc()}"
+                )
+                return
+
+        self.after(80, check)
+
+    def prewarm_modules(self, modules: list):
+        """
+        Importa em background uma lista de módulos para reduzir latência no primeiro clique.
+        Passar lista de nomes de módulos, ex: ['Base_produto', 'Saida_NF', ...]
+        """
+        def w():
+            for m in modules:
+                try:
+                    importlib.import_module(m)
+                except Exception:
+                    # falhas no prewarm não devem travar a UI
+                    pass
+        threading.Thread(target=w, daemon=True).start()
+
+    # ---- substituições das suas funções abrir_* para usar _open_async ----
     def abrir_base_produtos(self):
-        self.withdraw()
-        from Base_produto import InterfaceProduto
-        InterfaceProduto(self)
+        self._open_async("Base_produto", "InterfaceProduto")
 
     def abrir_base_materiais(self):
-        self.withdraw()
-        from Base_material import InterfaceMateriais
-        InterfaceMateriais(self)
+        self._open_async("Base_material", "InterfaceMateriais")
 
     def abrir_saida_nf(self):
-        self.withdraw()
-        from Saida_NF import SistemaNF
-        SistemaNF(self)
+        self._open_async("Saida_NF", "SistemaNF")
 
     def abrir_insercao_nf(self):
-        self.withdraw()
-        from Insercao_NF import Janela_InsercaoNF
-        Janela_InsercaoNF(self, self)
+        # este módulo aguardava (self, self)
+        self._open_async("Insercao_NF", "Janela_InsercaoNF", init_args=(self, self))
 
     def abrir_usuarios(self):
-        self.withdraw()
-        from usuario import InterfaceUsuarios
-        InterfaceUsuarios(self)
+        self._open_async("usuario", "InterfaceUsuarios")
 
     def Calculo_produto(self):
-        self.withdraw()
-        from Estoque import CalculoProduto
-        CalculoProduto(self)
+        self._open_async("Estoque", "CalculoProduto")
 
     def abrir_media_custo(self):
-        self.withdraw()
-        from media_custo import criar_media_custo
-        criar_media_custo(main_window=self)
+        # função que recebe main_window=self
+        self._open_async("media_custo", "criar_media_custo", is_func=True, init_kwargs={"main_window": self})
 
     def relatorio_item_grupo(self):
-        self.withdraw()
-        from relatorio_saida import RelatorioApp
-        RelatorioApp(self)  # Passa 'self' que é o menu principal
+        self._open_async("relatorio_saida", "RelatorioApp")
 
     def cotacao(self):
-        self.withdraw()
-        from relatorio_cotacao import CadastroProdutosApp
-        CadastroProdutosApp(self)  # Passa 'self' que é o menu principal
+        self._open_async("relatorio_cotacao", "CadastroProdutosApp")
 
     def registro_teste(self):
-        self.withdraw()
-        from registro_teste import RegistroTeste
-        RegistroTeste(janela_menu=self, master=self)
-        
+        # exemplo com kwargs específicos
+        self._open_async("registro_teste", "RegistroTeste", init_args=(), init_kwargs={"janela_menu": self, "master": self})
+
+    # logout e carregar_janela mantém o mesmo comportamento
     def logout(self):
         from login import TelaLogin
         self.destroy()  # Fecha a janela de menu
         TelaLogin().run()  # Cria e executa a tela de login
-        
+
     def carregar_janela(self, title, content):
         """Carrega conteúdo na área principal e restaura a janela do menu."""
         for widget in self.main_content.winfo_children():
