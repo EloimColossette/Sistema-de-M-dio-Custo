@@ -6,7 +6,6 @@ from conexao_db import conectar
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
-# Importar outras funções necessárias, como conectar(), centralizar_janela(), aplicar_icone(), etc.
 
 class InterfacePermissoes:
     def __init__(self, user_id=None, main_window=None, update_callback=None):
