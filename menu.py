@@ -300,9 +300,9 @@ class Janela_Menu(tk.Tk):
         janelas = {
             "criar_interface_produto": "Base de Produtos",
             "criar_interface_materiais": "Base de Materiais",
-            "SistemaNF": "Saída de Nfs",
-            "Janela_InsercaoNF": "Entrada de Nfs",
-            "Calculo_Produto": "Cálculo de Nfs",
+            "SistemaNF": "Saída de NFs",
+            "Janela_InsercaoNF": "Entrada de NFs",
+            "Calculo_Produto": "Cálculo de NFs",
             "criar_media_custo": "Média Custo",
             "criar_tela_usuarios": "Gerenciar Usuários",
             "RelatorioApp": "Relatório Item por Grupo",

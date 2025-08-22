@@ -33,9 +33,9 @@ class InterfacePermissoes:
         self.janelas = {
             "criar_interface_produto": "Base de Produtos",
             "criar_interface_materiais": "Base de Materiais",
-            "Janela_InsercaoNF": "Entrada de Nfs",
-            "Calculo_Produto": "Calculo de Nfs",
-            "SistemaNF": "Saída de Nfs",
+            "Janela_InsercaoNF": "Entrada de NFs",
+            "Calculo_Produto": "Calculo de NFs",
+            "SistemaNF": "Saída de NFs",
             "criar_media_custo": "Média Custo",
             "criar_tela_usuarios": "Gerenciamento de Usuário",
             "RelatorioApp": "Relatorio Item por Grupo",

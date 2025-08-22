@@ -8,7 +8,7 @@ import sys
 from logos import aplicar_icone
 from centralizacao_tela import centralizar_janela
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta,timezone
 import unicodedata
 import threading
 import traceback
@@ -16,6 +16,7 @@ import getpass
 import psycopg2.extensions
 import select
 import time
+import calendar
 
 class CalculoProduto:
     def __init__(self, janela_menu=None, *args, **kwargs):
@@ -85,7 +86,6 @@ class CalculoProduto:
         ttk.Label(self.frame_top, text="Produto:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
         self.entrada_produto = ttk.Combobox(self.frame_top, width=25, values=[], state="normal")
         self.entrada_produto.pack(side="left", padx=(0, 10))
-        # self.entrada_produto.bind("<<ComboboxSelected>>", self.on_select_produto)
     
         # Digitar Valor do Peso
         ttk.Label(self.frame_top, text="Digitar Valor do Peso:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
@@ -166,12 +166,6 @@ class CalculoProduto:
         self.botao_atualizar_custo_manual.pack(side="left", padx=5, pady=10)
         self.botao_notificacao.pack(side="left", padx=5, pady=10)
         self.botao_voltar.pack(side="left", padx=5, pady=10)
-
-        # # atualiza badge/contador do botão agora que ele existe e está empacotado
-        # try:
-        #     self.atualizar_notificacao_badge()
-        # except Exception:
-        #     pass
     
         # Frame para a barra de pesquisa
         self.frame_pesquisa = ttk.Frame(self.root)
@@ -206,6 +200,11 @@ class CalculoProduto:
         # Carrega os dados e atualiza o Treeview
         dados = self.carregar_dados()
         self.calcular_dados(dados)
+        self.verificar_e_avisar_exportacao_inicio(dias_aviso=3)
+        # garantir que a rotina de purga esteja rodando
+        self.iniciar_rotina_purga_mensal()
+        # garantir tabela de histórico criada
+        self.garantir_tabela_historico()
 
     def atualizar_treeview(self):
         """Função para atualizar o Treeview após a inserção de novos dados."""
@@ -1487,28 +1486,24 @@ class CalculoProduto:
 
     def mostrar_historico(self):
         """
-        Abre uma janela mostrando o histórico de ações gravado no banco de dados.
-        Exibe o usuário que realizou a ação (gravado no DB).
+        Janela do Histórico com filtro por produto e barra de pesquisa.
         """
         try:
             conn = conectar()
             cur = conn.cursor()
-            cur.execute("""
-                SELECT usuario, nf, produto, quantidade, tipo, timestamp
-                FROM calculo_historico
-                ORDER BY timestamp DESC
-                LIMIT 500
-            """)
-            rows = cur.fetchall()
+            # busca produtos distintos para popular o filtro
+            cur.execute("SELECT DISTINCT produto FROM calculo_historico WHERE produto IS NOT NULL ORDER BY produto;")
+            produtos_db = [r[0] for r in cur.fetchall() if r[0] is not None]
             cur.close()
             conn.close()
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao carregar histórico: {e}")
-            return
+            messagebox.showerror("Erro", f"Erro ao carregar produtos para filtro: {e}")
+            produtos_db = []
 
-        largura, altura = 900, 600
+        largura, altura = 1000, 650
         dialog = tk.Toplevel(self.root)
         dialog.title("Histórico de Cálculo")
+        dialog.transient(self.root)
         try:
             aplicar_icone(dialog, "C:\\Sistema\\logos\\Kametal.ico")
         except Exception:
@@ -1518,30 +1513,43 @@ class CalculoProduto:
         except Exception:
             pass
 
+        # frame principal
         frame = ttk.Frame(dialog, padding=10)
         frame.pack(fill="both", expand=True)
 
-        # Scrollbars
+        # --- filtros (top) ---
+        filtros_frame = ttk.Frame(frame)
+        filtros_frame.grid(row=0, column=0, sticky="ew", pady=(0,8))
+        filtros_frame.columnconfigure(2, weight=1)
+
+        ttk.Label(filtros_frame, text="Produto:", font=("Arial", 10)).grid(row=0, column=0, padx=(0,6))
+        produto_vals = ["(Todos)"] + produtos_db
+        produto_var = tk.StringVar(value="(Todos)")
+        combo_produto = ttk.Combobox(filtros_frame, values=produto_vals, textvariable=produto_var, state="readonly", width=30)
+        combo_produto.grid(row=0, column=1, padx=(0,8))
+
+        ttk.Label(filtros_frame, text="Pesquisar:", font=("Arial", 10)).grid(row=0, column=2, padx=(0,4), sticky="e")
+        termo_var = tk.StringVar()
+        entrada_busca = ttk.Entry(filtros_frame, textvariable=termo_var)
+        entrada_busca.grid(row=0, column=3, sticky="ew", padx=(0,8))
+
+        btn_filtrar = ttk.Button(filtros_frame, text="Filtrar")
+        btn_limpar = ttk.Button(filtros_frame, text="Limpar")
+        btn_filtrar.grid(row=0, column=4, padx=(2,4))
+        btn_limpar.grid(row=0, column=5)
+
+        # --- Treeview + scrollbars ---
         vsb = ttk.Scrollbar(frame, orient="vertical")
         hsb = ttk.Scrollbar(frame, orient="horizontal")
 
         cols = ("Usuário", "NF", "Produto", "Quantidade", "Operação", "Data/Hora")
-        tv = ttk.Treeview(
-            frame,
-            columns=cols,
-            show="headings",
-            yscrollcommand=vsb.set,
-            xscrollcommand=hsb.set
-        )
+        tv = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=vsb.set, xscrollcommand=hsb.set, height=20)
 
-        # cabeçalhos
         for c in cols:
             tv.heading(c, text=c)
-
-        # larguras e alinhamentos (NF e Produto centralizados conforme pedido)
         tv.column("Usuário", width=140, anchor="center")
         tv.column("NF", width=100, anchor="center")
-        tv.column("Produto", width=260, anchor="center")
+        tv.column("Produto", width=300, anchor="center")
         tv.column("Quantidade", width=100, anchor="center")
         tv.column("Operação", width=100, anchor="center")
         tv.column("Data/Hora", width=180, anchor="center")
@@ -1549,24 +1557,114 @@ class CalculoProduto:
         vsb.config(command=tv.yview)
         hsb.config(command=tv.xview)
 
-        tv.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
+        tv.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
 
-        frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        # Inserção simples: usa o usuário gravado no DB (não sobrescreve)
-        for usuario, nf, produto, quantidade, tipo, ts in rows:
-            operacao = "Adicionado" if tipo == "adicionar" else "Subtraído"
+        # função para carregar do DB com filtros
+        def carregar_rows(produto_filter="(Todos)", termo=""):
             try:
-                datahora = ts.strftime("%d/%m/%Y %H:%M:%S") if ts else ""
-            except Exception:
-                datahora = str(ts) if ts else ""
-            usuario_para_mostrar = usuario or ""
-            tv.insert("", "end", values=(usuario_para_mostrar, nf, produto, quantidade, operacao, datahora))
+                conn = conectar()
+                cur = conn.cursor()
+                base = """
+                    SELECT usuario, nf, produto, quantidade, tipo, timestamp
+                    FROM calculo_historico
+                """
+                conditions = []
+                params = []
 
-        ttk.Button(frame, text="Fechar", command=dialog.destroy).grid(row=2, column=0, pady=10, sticky="e")
+                if produto_filter and produto_filter != "(Todos)":
+                    conditions.append("produto = %s")
+                    params.append(produto_filter)
+
+                if termo and termo.strip():
+                    # normaliza (remove acentos)
+                    termo_proc = unicodedata.normalize("NFD", termo.strip().lower())
+                    termo_proc = "".join(ch for ch in termo_proc if unicodedata.category(ch) != "Mn")
+
+                    # mapeia termos da interface para os do banco
+                    if termo_proc in ["adicionado"]:
+                        termo_proc = "adicionar"
+                    elif termo_proc in ["subtraido", "subtraído"]:  # com ou sem acento
+                        termo_proc = "subtrair"
+
+                    termo_like = f"%{termo_proc}%"
+                    conditions.append("(usuario ILIKE %s OR CAST(nf AS TEXT) ILIKE %s OR produto ILIKE %s OR tipo ILIKE %s)")
+                    params.extend([termo_like, termo_like, termo_like, termo_like])
+
+                if conditions:
+                    base += " WHERE " + " AND ".join(conditions)
+
+                base += " ORDER BY timestamp DESC LIMIT 1000;"
+                cur.execute(base, tuple(params))
+                fetched = cur.fetchall()
+                cur.close()
+                conn.close()
+                return fetched
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao carregar histórico: {e}")
+                return []
+
+        # atualiza treeview com linhas (formata timestamp e operação)
+        def atualizar_tv(rows):
+            tv.delete(*tv.get_children())
+            for usuario, nf, produto, quantidade, tipo, ts in rows:
+                operacao = "Adicionado" if tipo == "adicionar" else "Subtraído"
+                try:
+                    datahora = ts.strftime("%d/%m/%Y %H:%M:%S") if ts else ""
+                except Exception:
+                    datahora = str(ts) if ts else ""
+                usuario_para_mostrar = usuario or ""
+                produto_para_mostrar = produto or ""
+                quantidade_formatada = str(quantidade).replace(".", ",")
+                tv.insert("", "end", values=(usuario_para_mostrar, nf, produto_para_mostrar, quantidade_formatada, operacao, datahora))
+
+        # pegar as linhas visíveis (para exportar)
+        def pegar_linhas_visiveis():
+            linhas = []
+            for iid in tv.get_children():
+                vals = tv.item(iid, "values")
+                if len(vals) >= 6:
+                    linhas.append((vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]))
+                else:
+                    padded = list(vals) + [""] * (6 - len(vals))
+                    linhas.append(tuple(padded[:6]))
+            return linhas
+
+        # ações dos botões filtrar/limpar
+        def aplicar_filtro(event=None):
+            prod = produto_var.get()
+            termo = termo_var.get()
+            rows = carregar_rows(prod, termo)
+            atualizar_tv(rows)
+
+        def limpar_filtro():
+            produto_var.set("(Todos)")
+            termo_var.set("")
+            rows = carregar_rows("(Todos)", "")
+            atualizar_tv(rows)
+
+        btn_filtrar.config(command=aplicar_filtro)
+        btn_limpar.config(command=limpar_filtro)
+        entrada_busca.bind("<Return>", aplicar_filtro)
+
+        # botão exportar / fechar (abaixo)
+        btn_frame_bottom = ttk.Frame(frame)
+        btn_frame_bottom.grid(row=3, column=0, pady=10, sticky="ew")
+        btn_frame_bottom.columnconfigure(0, weight=1)
+
+        ttk.Button(btn_frame_bottom, text="Exportar Visível", command=lambda: self.exportar_linhas_para_excel(pegar_linhas_visiveis())).pack(side="right", padx=6)
+        ttk.Button(btn_frame_bottom, text="Exportar Tudo", command=lambda: self.exportar_historico_para_excel()).pack(side="right", padx=6)
+        ttk.Button(btn_frame_bottom, text="Fechar", command=dialog.destroy).pack(side="right", padx=6)
+
+        # carrega dados iniciais (limit 500 -> usamos 1000 no carregar_rows; aqui mostramos os últimos 500 como antes)
+        initial_rows = carregar_rows("(Todos)", "")
+        if len(initial_rows) > 500:
+            initial_rows = initial_rows[:500]
+        atualizar_tv(initial_rows)
 
     def garantir_tabela_historico(self):
         """
@@ -1766,6 +1864,7 @@ class CalculoProduto:
     def exportar_historico_para_excel(self):
         """
         Exporta todo o histórico do banco para um arquivo .xlsx (pede local de salvamento).
+        Retorna o caminho do arquivo salvo, ou None se o usuário cancelar / ocorrer erro.
         """
         try:
             conn = conectar()
@@ -1776,13 +1875,32 @@ class CalculoProduto:
             conn.close()
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao recuperar histórico para exportar: {e}")
-            return
+            return None
 
         if not rows:
             messagebox.showinfo("Exportar Histórico", "Não há registros para exportar.")
-            return
+            return None
 
-        df = pd.DataFrame(rows, columns=["id", "usuario", "nf", "produto", "quantidade", "tipo", "timestamp"])
+        # Normaliza timestamps: converte tz-aware para string legível (dd/mm/YYYY HH:MM:SS)
+        processed = []
+        for r in rows:
+            try:
+                ts = r[6]
+                if isinstance(ts, datetime):
+                    # se tz-aware, converte para UTC e remove tzinfo; se não, usa direto
+                    if ts.tzinfo is not None:
+                        ts_naive = ts.astimezone(timezone.utc).replace(tzinfo=None)
+                    else:
+                        ts_naive = ts
+                    ts_str = ts_naive.strftime("%d/%m/%Y %H:%M:%S")
+                else:
+                    ts_str = str(ts) if ts is not None else ""
+            except Exception:
+                ts_str = str(r[6]) if r[6] is not None else ""
+            # monta tupla com timestamp convertido para string
+            processed.append((r[0], r[1], r[2], r[3], r[4], r[5], ts_str))
+
+        df = pd.DataFrame(processed, columns=["id", "usuario", "nf", "produto", "quantidade", "tipo", "timestamp"])
 
         caminho = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
@@ -1790,13 +1908,55 @@ class CalculoProduto:
             title="Salvar histórico como..."
         )
         if not caminho:
+            # usuário cancelou
+            messagebox.showinfo("Exportar Histórico", "Exportação cancelada.")
+            return None
+
+        try:
+            df.to_excel(caminho, index=False)
+            messagebox.showinfo("Exportar Histórico", f"Histórico exportado com sucesso para:\n{caminho}")
+            return caminho
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao salvar o arquivo Excel: {e}")
+            return None
+        
+    def exportar_linhas_para_excel(self, rows, sugestao_nome=None):
+        """
+        Exporta a lista de tuplas 'rows' para .xlsx.
+        rows: lista de tuplas (usuario, nf, produto, quantidade, tipo, timestamp)
+        """
+        if not rows:
+            messagebox.showinfo("Exportar Histórico", "Não há registros para exportar.")
             return
+
+        # monta DataFrame
+        try:
+            df = pd.DataFrame(rows, columns=["Usuário", "NF", "Produto", "Quantidade", "Operação", "Data/Hora"])
+        except Exception:
+            # fallback simples
+            df = pd.DataFrame([list(r) for r in rows], columns=["Usuário", "NF", "Produto", "Quantidade", "Operação", "Data/Hora"])
+
+        # sugere nome
+        if sugestao_nome:
+            default_name = sugestao_nome
+        else:
+            default_name = f"historico_calculo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        caminho = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            initialfile=default_name,
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="Salvar histórico como..."
+        )
+        if not caminho:
+            return
+
         try:
             df.to_excel(caminho, index=False)
             messagebox.showinfo("Exportar Histórico", f"Histórico exportado com sucesso para:\n{caminho}")
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao salvar o arquivo Excel: {e}")
-
+   
     def iniciar_rotina_purga_mensal(self):
         """
         Inicia uma thread que agenda aviso no final do mês para apagar a tabela de histórico.
@@ -1869,10 +2029,23 @@ class CalculoProduto:
         def on_export_and_delete():
             dialog.destroy()
             try:
-                self.exportar_historico_para_excel()
+                caminho = self.exportar_historico_para_excel()
             except Exception:
-                pass
-            self.executar_purga()
+                caminho = None
+
+            if caminho:
+                # export foi bem-sucedida — prossegue com a purge
+                self.executar_purga()
+            else:
+                # export cancelada ou falhou — pergunta se usuário quer apagar sem exportar
+                resp = messagebox.askyesno(
+                    "Apagar sem exportar?",
+                    "A exportação não foi concluída. Deseja apagar o histórico mesmo assim?"
+                )
+                if resp:
+                    self.executar_purga()
+                else:
+                    messagebox.showinfo("Cancelado", "Operação de purge cancelada.")
 
         def on_delete_now():
             dialog.destroy()
@@ -1893,6 +2066,29 @@ class CalculoProduto:
         ttk.Button(btn_frame, text="Apagar Agora", command=on_delete_now).pack(side="left", padx=6)
         ttk.Button(btn_frame, text="Adiar 24h", command=on_defer_24h).pack(side="left", padx=6)
 
+    def segundos_ate_proxima_purga(self):
+        agora = datetime.now()
+        ano = agora.year
+        mes = agora.month
+
+        # último dia do mês corrente
+        ultimo_dia = calendar.monthrange(ano, mes)[1]
+        purge_dt = datetime(ano, mes, ultimo_dia, 23, 55)
+
+        delta = (purge_dt - agora).total_seconds()
+        if delta < 0:
+            # agendar para o próximo mês
+            if mes == 12:
+                ano2, mes2 = ano + 1, 1
+            else:
+                ano2, mes2 = ano, mes + 1
+            ultimo_dia2 = calendar.monthrange(ano2, mes2)[1]
+            purge_dt = datetime(ano2, mes2, ultimo_dia2, 23, 55)
+            delta = (purge_dt - agora).total_seconds()
+
+        # garante espera mínima (evita sleep(0))
+        return max(60, int(delta))
+
     def executar_purga(self):
         """
         Executa o DELETE na tabela calculo_historico e notifica instâncias via NOTIFY.
@@ -1911,6 +2107,25 @@ class CalculoProduto:
             messagebox.showerror("Erro", f"Erro ao apagar histórico: {e}")
             print("Erro no executar_purga:", e)
             traceback.print_exc()
+
+    def verificar_e_avisar_exportacao_inicio(self, dias_aviso=3):
+        """Ao iniciar, avisa se estiver a <= dias_aviso do final do mês."""
+        hoje = date.today()
+        ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+        dias_restantes = ultimo_dia - hoje.day
+
+        if dias_restantes <= dias_aviso:
+            # apresenta aviso não bloqueante (executa após 1s para garantir mainloop iniciado)
+            def mostrar():
+                try:
+                    messagebox.showinfo(
+                        "Lembrete de Purga Mensal",
+                        f"Faltam {dias_restantes} dias para a purga mensal do histórico.\n"
+                        "Recomenda-se exportar o histórico para não perder os dados."
+                    )
+                except Exception:
+                    pass
+            self.root.after(1000, mostrar)
 
     def voltar_para_menu(self):
         """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
