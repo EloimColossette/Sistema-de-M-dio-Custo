@@ -1716,7 +1716,7 @@ class Janela_Menu(tk.Tk):
         self._open_async("usuario", "InterfaceUsuarios")
 
     def Calculo_produto(self):
-        self._open_async("Estoque", "CalculoProduto")
+         self._open_async("Estoque", "CalculoProduto", init_kwargs={"janela_menu": self})
 
     def abrir_media_custo(self):
         # função que recebe main_window=self
