@@ -8,19 +8,34 @@ import sys
 from logos import aplicar_icone
 from centralizacao_tela import centralizar_janela
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import unicodedata
 import threading
-import json
-import os
+import traceback
+import getpass
+import psycopg2.extensions
+import select
+import time
 
 class CalculoProduto:
-    def __init__(self, janela_menu):
+    def __init__(self, janela_menu=None, *args, **kwargs):
+        # guarda referência do menu (se foi passada)
+        self.janela_menu = janela_menu or kwargs.get("janela_menu", None)
         self.janela_menu = janela_menu
         self.root = tk.Toplevel()
         self.root.title("Calculo de Nfs")
         self.root.geometry("1200x700")
         self.root.state("zoomed")
+
+         # determina usuário para registrar: prioridade
+        # 1) menu.user_name  2) kwargs['usuario']  3) getpass.getuser()
+        try:
+            if self.janela_menu and getattr(self.janela_menu, "user_name", None):
+                self.usuario = self.janela_menu.user_name
+            else:
+                self.usuario = kwargs.get("usuario") or getpass.getuser()
+        except Exception:
+            self.usuario = kwargs.get("usuario") or getpass.getuser()
 
         # Oculta a janela de menu
         self.janela_menu.withdraw()
@@ -32,13 +47,13 @@ class CalculoProduto:
         self.criar_widgets()
         self.carregar_dados_iniciais()
 
-        # garante que a pasta 'config' exista
-        config_dir = os.path.join(os.path.dirname(__file__), "config")
-        os.makedirs(config_dir, exist_ok=True)
+        # # garante que a pasta 'config' exista
+        # config_dir = os.path.join(os.path.dirname(__file__), "config")
+        # os.makedirs(config_dir, exist_ok=True)
 
-        # caminho do arquivo de histórico local dentro da pasta config
-        self.history_path = os.path.join(config_dir, "History_Calculo.json")
-        self.history = self.load_history()
+        # # caminho do arquivo de histórico local dentro da pasta config
+        # self.history_path = os.path.join(config_dir, "History_Calculo.json")
+        # self.history = self.load_history()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -70,7 +85,7 @@ class CalculoProduto:
         ttk.Label(self.frame_top, text="Produto:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
         self.entrada_produto = ttk.Combobox(self.frame_top, width=25, values=[], state="normal")
         self.entrada_produto.pack(side="left", padx=(0, 10))
-        self.entrada_produto.bind("<<ComboboxSelected>>", self.on_select_produto)
+        # self.entrada_produto.bind("<<ComboboxSelected>>", self.on_select_produto)
     
         # Digitar Valor do Peso
         ttk.Label(self.frame_top, text="Digitar Valor do Peso:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
@@ -135,7 +150,7 @@ class CalculoProduto:
         self.botao_notificacao = ttk.Button(
             self.frame_botoes,
             text="Historico de Calculo",
-            command=self.show_notifications,
+            command=self.mostrar_historico,
             style="Estoque.TButton"
         )
 
@@ -152,11 +167,11 @@ class CalculoProduto:
         self.botao_notificacao.pack(side="left", padx=5, pady=10)
         self.botao_voltar.pack(side="left", padx=5, pady=10)
 
-        # atualiza badge/contador do botão agora que ele existe e está empacotado
-        try:
-            self.atualizar_notificacao_badge()
-        except Exception:
-            pass
+        # # atualiza badge/contador do botão agora que ele existe e está empacotado
+        # try:
+        #     self.atualizar_notificacao_badge()
+        # except Exception:
+        #     pass
     
         # Frame para a barra de pesquisa
         self.frame_pesquisa = ttk.Frame(self.root)
@@ -533,8 +548,19 @@ class CalculoProduto:
         valor_restante = valor_entrada
         atualizacoes = []  # elementos: (id_produto, nf, nova_quantidade, quantidade_anterior)
 
+        # Mais seguro: converte valores lidos
+        try:
+            resultados_conv = []
+            for r in resultados:
+                id_produto, nf, prod, peso_liquido, quantidade_estoque = r
+                quantidade_estoque = Decimal(quantidade_estoque)
+                resultados_conv.append((id_produto, nf, prod, peso_liquido, quantidade_estoque))
+        except Exception:
+            # se algo der errado, usa resultados originais (mas convertendo na hora)
+            resultados_conv = resultados
+
         if operacao == "Subtrair":
-            total_disponivel = sum(Decimal(r[4]) for r in resultados)
+            total_disponivel = sum(Decimal(r[4]) for r in resultados_conv)
 
             if valor_entrada > total_disponivel:
                 messagebox.showerror(
@@ -545,7 +571,7 @@ class CalculoProduto:
                 conn.close()
                 return
 
-            for resultado in resultados:
+            for resultado in resultados_conv:
                 id_produto, nf, prod, peso_liquido, quantidade_estoque = resultado
                 quantidade_estoque = Decimal(quantidade_estoque)
 
@@ -555,52 +581,38 @@ class CalculoProduto:
                     valor_restante = Decimal("0")
                     break
                 else:
-                    nova_quantidade_estoque = Decimal("0")
+                    # zera esse registro e continua subtraindo do próximo
+                    espaco_disponivel = quantidade_estoque
+                    nova_quantidade_estoque = quantidade_estoque - espaco_disponivel  # = 0
                     atualizacoes.append((id_produto, nf, nova_quantidade_estoque, quantidade_estoque))
-                    valor_restante -= quantidade_estoque
-
-            if valor_restante > 0:
-                messagebox.showwarning("Aviso", f"Não foi possível subtrair todo o valor! Restante: {valor_restante:.3f}")
+                    valor_restante -= espaco_disponivel
 
         elif operacao == "Adicionar":
-            # Pega as NFs mais recentes primeiro
-            query = """
-            SELECT sp.id, sp.nf, sp.produto, sp.peso_liquido, COALESCE(eq.quantidade_estoque, sp.peso_liquido)
-            FROM somar_produtos sp
-            LEFT JOIN estoque_quantidade eq ON sp.id = eq.id_produto
-            WHERE sp.produto = %s
-            ORDER BY sp.data DESC, sp.nf DESC
-            """
-            cursor.execute(query, (produto_nome,))
-            resultados = cursor.fetchall()
-
-            total_disponivel = sum(Decimal(r[3]) - Decimal(r[4]) for r in resultados)
-
-            if valor_entrada > total_disponivel:
-                messagebox.showerror(
-                    "Erro",
-                    f"O valor de entrada ({valor_entrada:.3f}) ultrapassa o espaço disponível nas notas fiscais ({total_disponivel:.3f})!"
-                )
-                cursor.close()
-                conn.close()
-                return
-
-            for resultado in resultados:
+            # percorre do mais novo para o mais antigo (LIFO)
+            for resultado in reversed(resultados_conv):
                 id_produto, nf, prod, peso_liquido, quantidade_estoque = resultado
-                peso_liquido = Decimal(peso_liquido)
-                quantidade_estoque = Decimal(quantidade_estoque)
 
-                if valor_restante <= 0:
-                    break
+                # conversões seguras (evita virar 0 por erro de conversão)
+                try:
+                    peso_liquido_dec = Decimal(str(peso_liquido)) if peso_liquido is not None else Decimal("0")
+                except Exception:
+                    peso_liquido_dec = Decimal("0")
 
-                espaco_disponivel = peso_liquido - quantidade_estoque
+                quantidade_estoque = Decimal(str(quantidade_estoque))
+
+                espaco_disponivel = peso_liquido_dec - quantidade_estoque
+                if espaco_disponivel <= 0:
+                    # NF já está cheia, pula
+                    continue
 
                 if valor_restante <= espaco_disponivel:
                     nova_quantidade_estoque = quantidade_estoque + valor_restante
                     atualizacoes.append((id_produto, nf, nova_quantidade_estoque, quantidade_estoque))
                     valor_restante = Decimal("0")
+                    break
                 else:
-                    nova_quantidade_estoque = peso_liquido
+                    # enche essa NF até o limite e segue para a anterior
+                    nova_quantidade_estoque = peso_liquido_dec  # equivale a quantidade_estoque + espaco_disponivel
                     atualizacoes.append((id_produto, nf, nova_quantidade_estoque, quantidade_estoque))
                     valor_restante -= espaco_disponivel
 
@@ -608,19 +620,31 @@ class CalculoProduto:
                 messagebox.showwarning("Aviso", f"Não foi possível adicionar todo o valor! Restante: {valor_restante:.3f}")
 
         # Atualiza a tabela no banco
-        for id_produto, nf, nova_quantidade, quantidade_anterior in atualizacoes:
-            insert_query = """
-            INSERT INTO estoque_quantidade (id_produto, quantidade_estoque)
-            VALUES (%s, %s)
-            ON CONFLICT (id_produto)
-            DO UPDATE SET quantidade_estoque = EXCLUDED.quantidade_estoque
-            """
-            cursor.execute(insert_query, (id_produto, nova_quantidade))
+        try:
+            for id_produto, nf, nova_quantidade, quantidade_anterior in atualizacoes:
+                insert_query = """
+                INSERT INTO estoque_quantidade (id_produto, quantidade_estoque)
+                VALUES (%s, %s)
+                ON CONFLICT (id_produto)
+                DO UPDATE SET quantidade_estoque = EXCLUDED.quantidade_estoque
+                """
+                cursor.execute(insert_query, (id_produto, nova_quantidade))
+            conn.commit()
+        except Exception as e:
+            # se der erro no update, desfaz e mostra mensagem
+            conn.rollback()
+            messagebox.showerror("Erro", f"Erro ao atualizar o banco: {e}")
+            cursor.close()
+            conn.close()
+            return
 
-        conn.commit()
-
-        cursor.execute("NOTIFY canal_atualizacao, 'menu_atualizado';")
-        conn.commit()
+        # Notifica, commit já feito acima
+        try:
+            cursor.execute("NOTIFY canal_atualizacao, 'menu_atualizado';")
+            conn.commit()
+        except Exception:
+            # não crítico — prossegue
+            pass
 
         # Atualiza o Treeview para refletir as alterações
         for id_produto, nf, nova_quantidade, quantidade_anterior in atualizacoes:
@@ -629,7 +653,10 @@ class CalculoProduto:
                 # valores[1] = NF (coluna 1), valores[4] = Qtd Estoque (coluna 4)
                 if str(valores[1]) == str(nf):
                     # Formata quantidade nova para exibição (vírgula)
-                    quantidade_formatada = f"{nova_quantidade:.3f}".replace('.', ',')
+                    try:
+                        quantidade_formatada = f"{Decimal(nova_quantidade):.3f}".replace('.', ',')
+                    except Exception:
+                        quantidade_formatada = str(nova_quantidade)
                     # Mantemos as colunas anteriores, atualizamos a coluna Qtd Estoque (índice 4)
                     novos_valores = list(valores)
                     # garante que exista índice 4
@@ -647,7 +674,12 @@ class CalculoProduto:
                     except Exception:
                         quantidade_decimal_tree = quantidade_anterior
 
-                    if nova_quantidade == 0:
+                    try:
+                        nova_q_dec = Decimal(str(nova_quantidade))
+                    except Exception:
+                        nova_q_dec = nova_quantidade
+
+                    if nova_q_dec == 0:
                         self.treeview.item(item, tags="red_text")
                     elif Decimal(str(nova_quantidade)) != Decimal(str(quantidade_decimal_tree)):
                         self.treeview.item(item, tags="partial_red_text")
@@ -655,23 +687,53 @@ class CalculoProduto:
                         self.treeview.item(item, tags="")
 
                     self.treeview.item(item, values=tuple(novos_valores))
+
+                    # ✅ Seleciona e dá foco na linha modificada
+                    self.treeview.selection_set(item)
+                    self.treeview.focus(item)
+                    self.treeview.see(item)
+
                     break
 
         # <<< registra no histórico usando os valores corretos (quantidade_anterior) >>>
+        usuario_para_registro = getattr(self, "usuario", None) or ""
         for id_produto, nf, nova_quantidade, quantidade_anterior in atualizacoes:
+            try:
+                qt_anterior = Decimal(str(quantidade_anterior))
+                qt_nova = Decimal(str(nova_quantidade))
+            except Exception:
+                try:
+                    qt_anterior = Decimal(quantidade_anterior)
+                    qt_nova = Decimal(nova_quantidade)
+                except Exception:
+                    qt_anterior = Decimal("0")
+                    qt_nova = Decimal("0")
+
             if operacao == "Subtrair":
-                quantidade_sub = quantidade_anterior - nova_quantidade
+                quantidade_sub = qt_anterior - qt_nova
                 if quantidade_sub > 0:
-                    self.record_action(nf, produto_nome, quantidade_sub, "subtrair")
+                    # tipo correto: "subtrair"
+                    self.registrar_acao_historico(nf, produto_nome, quantidade_sub, "subtrair", usuario=usuario_para_registro)
 
             elif operacao == "Adicionar":
-                quantidade_add = nova_quantidade - quantidade_anterior
+                quantidade_add = qt_nova - qt_anterior
                 if quantidade_add > 0:
-                    self.record_action(nf, produto_nome, quantidade_add, "adicionar")
+                    # tipo correto: "adicionar"
+                    self.registrar_acao_historico(nf, produto_nome, quantidade_add, "adicionar", usuario=usuario_para_registro)
 
-        cursor.close()
-        conn.close()
-        messagebox.showinfo("Sucesso", "Operação realizada com sucesso!")
+        # Mostra mensagem de sucesso só se teve alguma atualização
+        if atualizacoes:
+            messagebox.showinfo("Sucesso", "Cálculo realizado com sucesso!")
+
+        # Fecha cursores/conexão
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     def calcular_valor_nf(self):
         """
@@ -1423,34 +1485,123 @@ class CalculoProduto:
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao reiniciar os IDs: {e}")
 
-    # ------------------- Histórico local (JSON) -------------------
-    def load_history(self):
-        """Carrega o histórico local de ações (JSON)."""
+    def mostrar_historico(self):
+        """
+        Abre uma janela mostrando o histórico de ações gravado no banco de dados.
+        Exibe o usuário que realizou a ação (gravado no DB).
+        """
         try:
-            if os.path.exists(self.history_path):
-                with open(self.history_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT usuario, nf, produto, quantidade, tipo, timestamp
+                FROM calculo_historico
+                ORDER BY timestamp DESC
+                LIMIT 500
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao carregar histórico: {e}")
+            return
+
+        largura, altura = 900, 600
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Histórico de Cálculo")
+        try:
+            aplicar_icone(dialog, "C:\\Sistema\\logos\\Kametal.ico")
         except Exception:
             pass
-        # estrutura: lista de entradas
-        return []
-
-    def save_history(self):
-        """Salva o histórico atual no arquivo JSON."""
         try:
-            with open(self.history_path, "w", encoding="utf-8") as f:
-                json.dump(self.history, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print("Erro ao salvar histórico local:", e)
+            centralizar_janela(dialog, largura, altura)
+        except Exception:
+            pass
 
-    def record_action(self, nf, produto, quantidade, tipo):
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(frame, orient="vertical")
+        hsb = ttk.Scrollbar(frame, orient="horizontal")
+
+        cols = ("Usuário", "NF", "Produto", "Quantidade", "Operação", "Data/Hora")
+        tv = ttk.Treeview(
+            frame,
+            columns=cols,
+            show="headings",
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set
+        )
+
+        # cabeçalhos
+        for c in cols:
+            tv.heading(c, text=c)
+
+        # larguras e alinhamentos (NF e Produto centralizados conforme pedido)
+        tv.column("Usuário", width=140, anchor="center")
+        tv.column("NF", width=100, anchor="center")
+        tv.column("Produto", width=260, anchor="center")
+        tv.column("Quantidade", width=100, anchor="center")
+        tv.column("Operação", width=100, anchor="center")
+        tv.column("Data/Hora", width=180, anchor="center")
+
+        vsb.config(command=tv.yview)
+        hsb.config(command=tv.xview)
+
+        tv.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # Inserção simples: usa o usuário gravado no DB (não sobrescreve)
+        for usuario, nf, produto, quantidade, tipo, ts in rows:
+            operacao = "Adicionado" if tipo == "adicionar" else "Subtraído"
+            try:
+                datahora = ts.strftime("%d/%m/%Y %H:%M:%S") if ts else ""
+            except Exception:
+                datahora = str(ts) if ts else ""
+            usuario_para_mostrar = usuario or ""
+            tv.insert("", "end", values=(usuario_para_mostrar, nf, produto, quantidade, operacao, datahora))
+
+        ttk.Button(frame, text="Fechar", command=dialog.destroy).grid(row=2, column=0, pady=10, sticky="e")
+
+    def garantir_tabela_historico(self):
         """
-        Registra uma ação local:
+        Cria a tabela calculo_historico no banco caso não exista.
+        Chamar no __init__ da classe principal.
+        """
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS calculo_historico (
+                    id serial PRIMARY KEY,
+                    usuario TEXT,
+                    nf TEXT,
+                    produto TEXT,
+                    quantidade NUMERIC,
+                    tipo TEXT,
+                    timestamp timestamptz DEFAULT now()
+                );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_calculo_historico_produto ON calculo_historico(produto);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_calculo_historico_nf ON calculo_historico(nf);")
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print("Erro ao garantir tabela calculo_historico:", e)
+            traceback.print_exc()
+
+    def registrar_acao_historico(self, nf, produto, quantidade, tipo, usuario=None):
+        """
+        Registra a ação no histórico (insere no BD e mantém cache local).
         tipo: 'subtrair' ou 'adicionar'
-        quantidade: string ou número (trata como Decimal)
-        Não grava entradas idênticas consecutivas (proteção contra duplicados).
         """
-        # garante que history exista
+        # garante que exista cache local
         if not hasattr(self, "history") or self.history is None:
             self.history = []
 
@@ -1459,204 +1610,307 @@ class CalculoProduto:
         except Exception:
             qt = Decimal("0")
 
-        now = datetime.now()
-        timestamp_iso = now.isoformat()
-        data_str = now.strftime("%d/%m/%Y")
-        hora_str = now.strftime("%H:%M:%S")
+        agora = datetime.now()
+        timestamp_iso = agora.isoformat()
+        data_str = agora.strftime("%d/%m/%Y")
+        hora_str = agora.strftime("%H:%M:%S")
 
-        entry = {
+        entrada = {
             "nf": str(nf),
             "produto": str(produto),
-            "quantidade": f"{qt}",   # string para evitar problemas de json com Decimal
+            "quantidade": f"{qt}",
             "tipo": tipo,
             "timestamp": timestamp_iso,
             "data": data_str,
-            "hora": hora_str
+            "hora": hora_str,
+            "usuario": usuario or ""
         }
 
-        # Proteção contra duplicatas imediatas: se a última entrada for igual, ignora
+        # evita duplicatas imediatas locais
         if self.history:
             last = self.history[-1]
-            if (last.get("nf") == entry["nf"] and
-                last.get("produto") == entry["produto"] and
-                last.get("quantidade") == entry["quantidade"] and
-                last.get("tipo") == entry["tipo"]):
-                return  # já existe uma entrada idêntica imediatamente anterior
-
-        self.history.append(entry)
-
-        # Limita em 100 registros por produto (mantém só os últimos 100)
-        registros_produto = [e for e in self.history if e.get("produto") == produto]
-        if len(registros_produto) > 100:
-            # Remove todas as entradas deste produto e adiciona apenas as últimas 100
-            self.history = [e for e in self.history if e.get("produto") != produto]
-            self.history.extend(registros_produto[-100:])
-
-        self.save_history()
-        self.atualizar_notificacao_badge()
-
-    def compute_remaining_from_history(self, nf, produto, peso_liquido):
-        """
-        Calcula quanto resta na NF/produto aplicando o histórico local sobre o peso_liquido original.
-        Retorna Decimal(remaining).
-        """
-        try:
-            restante = Decimal(str(peso_liquido))
-        except Exception:
-            restante = Decimal("0")
-        for e in self.history:
-            if str(e.get("nf")) == str(nf) and str(e.get("produto")).strip() == str(produto).strip():
-                try:
-                    q = Decimal(str(e.get("quantidade", "0")))
-                except Exception:
-                    q = Decimal("0")
-                if e.get("tipo") == "subtrair":
-                    restante -= q
-                elif e.get("tipo") == "adicionar":
-                    restante += q
-        # não deixa negativo se preferir
-        return restante if restante >= 0 else Decimal("0")
-
-    def atualizar_notificacao_badge(self):
-        """Atualiza o texto do botão de notificações com a quantidade de NFs 'não processadas'."""
-        try:
-            dados = self.carregar_dados()  # usa sua função que traz (data, nf, produto, peso_liquido, ...)
-        except Exception:
-            dados = []
-        count = 0
-        seen = set()
-        for row in dados:
-            nf = row[1]; produto = row[2]; peso_liquido = row[3] or 0
-            chave = f"{nf}|{produto}"
-            if chave in seen:
-                continue
-            seen.add(chave)
-            restante = self.compute_remaining_from_history(nf, produto, peso_liquido)
-            # se restante == peso_liquido então ninguém mexeu (não processado)
-            try:
-                if Decimal(str(restante)) == Decimal(str(peso_liquido)):
-                    count += 1
-            except Exception:
-                pass
-        self.botao_notificacao.config(text=f"Historico de Calculo")
-
-    def show_notifications(self):
-        """Mostra janela de histórico filtrado por produto."""
-        largura, altura = 700, 600
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Notificações - Histórico")
-        aplicar_icone(dialog, "C:\\Sistema\\logos\\Kametal.ico")
-
-        # centraliza a janela
-        centralizar_janela(dialog, largura, altura)
-
-        frame = ttk.Frame(dialog, padding=10)
-        frame.pack(fill="both", expand=True)
-
-        # Lista suspensa de produtos (filtra valores None)
-        produtos_unicos = sorted({e.get("produto") for e in (self.history or []) if e.get("produto")})
-        ttk.Label(frame, text="Selecionar Produto:", font=("Arial", 10, "bold")).pack(anchor="w")
-
-        produto_var = tk.StringVar()
-        combo_produtos = ttk.Combobox(
-            frame,
-            textvariable=produto_var,
-            values=produtos_unicos,
-            state="readonly",
-            width=40
-        )
-        combo_produtos.pack(fill="x", pady=5)
-        combo_produtos.set('')  # garante que não apareça texto inicial
-
-        # Container para treeview + scrollbars
-        tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill="both", expand=True, pady=5)
-
-        # Scrollbars
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical")
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal")
-
-        # Treeview com 5 colunas (inclui Data)
-        cols = ("Produto", "Quantidade", "Operação", "Data", "Hora")
-        tv = ttk.Treeview(
-            tree_frame,
-            columns=cols,
-            show="headings",
-            height=15,
-            yscrollcommand=vsb.set,
-            xscrollcommand=hsb.set
-        )
-
-        for c in cols:
-            tv.heading(c, text=c)
-        # ajustar larguras
-        tv.column("Produto", anchor="w", width=240)
-        tv.column("Quantidade", anchor="center", width=100)
-        tv.column("Operação", anchor="center", width=100)
-        tv.column("Data", anchor="center", width=90)
-        tv.column("Hora", anchor="center", width=70)
-
-        # associa scrollbars
-        vsb.config(command=tv.yview)
-        hsb.config(command=tv.xview)
-
-        # layout com grid (para scrollbars funcionarem bem)
-        tv.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        tree_frame.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)
-
-        # Função para preencher a tabela filtrada
-        def atualizar_tabela(*args):
-            tv.delete(*tv.get_children())  # limpa
-            produto_sel = produto_var.get()
-            if not produto_sel:
+            if (last.get("nf") == entrada["nf"] and
+                last.get("produto") == entrada["produto"] and
+                last.get("quantidade") == entrada["quantidade"] and
+                last.get("tipo") == entrada["tipo"]):
                 return
 
-            # filtra só o produto selecionado
-            registros = [e for e in self.history if e.get("produto") == produto_sel]
+        # grava no banco
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO calculo_historico (usuario, nf, produto, quantidade, tipo) VALUES (%s, %s, %s, %s, %s)",
+                (usuario or "", str(nf), str(produto), Decimal(str(qt)), tipo)
+            )
+            conn.commit()
+            # notifica outras instâncias
+            cur.execute("NOTIFY historico_atualizado, 'novo';")
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print("Erro gravando histórico no DB:", e)
+            traceback.print_exc()
 
-            # ordena do mais recente para o mais antigo, usando timestamp
-            registros.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        # mantém cache local para compatibilidade
+        self.history.append(entrada)
 
-            for e in registros:
-                quantidade = e.get("quantidade", "")
-                operacao = "Adicionado" if e.get("tipo") == "adicionar" else "Subtraído"
+        # Limita a 100 registros por produto no cache local (mesma lógica do original)
+        try:
+            registros_produto = [e for e in self.history if e.get("produto") == produto]
+            if len(registros_produto) > 100:
+                # remove antigos e mantém últimos 100
+                self.history = [e for e in self.history if e.get("produto") != produto]
+                self.history.extend(registros_produto[-100:])
+        except Exception:
+            pass
 
-                # obtém data/hora
-                if e.get("data") and e.get("hora"):
-                    data_str = e.get("data")
-                    hora_str = e.get("hora")
-                else:
-                    ts = e.get("timestamp")
-                    try:
-                        dt = datetime.fromisoformat(ts)
-                        data_str = dt.strftime("%d/%m/%Y")
-                        hora_str = dt.strftime("%H:%M:%S")
-                    except Exception:
-                        data_str, hora_str = "", ""
+        # persiste cache local e atualiza UI
+        try:
+            self.save_history()
+        except Exception:
+            pass
+        try:
+            self.atualizar_notificacao_badge()
+        except Exception:
+            pass
 
-                tv.insert("", "end", values=(produto_sel, quantidade, operacao, data_str, hora_str))
-
-        # Atualiza quando selecionar produto
-        combo_produtos.bind("<<ComboboxSelected>>", atualizar_tabela)
-
-        # Botão de fechar
-        ttk.Button(frame, text="Fechar", command=dialog.destroy).pack(pady=5)
-
-    def on_select_produto(self, event):
-        produto = self.entrada_produto.get().strip()
-        if not produto:
+    def recarregar_historico_do_bd(self, limit=1000):
+        """
+        Carrega os últimos 'limit' registros do banco para self.history (cache local).
+        Chamar após receber NOTIFY ou na inicialização.
+        """
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT usuario, nf, produto, quantidade, tipo, timestamp
+                FROM calculo_historico
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print("Erro carregando histórico do DB:", e)
+            traceback.print_exc()
             return
 
-        linhas = []
-        for e in (self.history or []):
-            if e.get("produto", "").strip().lower() == produto.lower():
-                linhas.append(f"{e.get('timestamp')} | {e.get('tipo')} {e.get('quantidade')} kg")
+        nova_history = []
+        for r in rows:
+            usuario_db, nf_db, produto_db, quantidade_db, tipo_db, ts_db = r
+            try:
+                ts_iso = ts_db.isoformat()
+                data_str = ts_db.strftime("%d/%m/%Y")
+                hora_str = ts_db.strftime("%H:%M:%S")
+            except Exception:
+                ts_iso = str(ts_db)
+                data_str = ""
+                hora_str = ""
+            nova_history.append({
+                "usuario": usuario_db,
+                "nf": str(nf_db),
+                "produto": str(produto_db),
+                "quantidade": f"{quantidade_db}",
+                "tipo": tipo_db,
+                "timestamp": ts_iso,
+                "data": data_str,
+                "hora": hora_str
+            })
 
-        if not linhas:
-            return   # não mostra mensagem nenhuma
+        # ordena ascendente por timestamp para compatibilidade com UI
+        self.history = list(reversed(nova_history))
+        try:
+            self.save_history()
+        except Exception:
+            pass
+        try:
+            self.root.after(0, self.atualizar_notificacao_badge)
+        except Exception:
+            pass
+
+    def iniciar_escuta_historico(self):
+        """
+        Inicia uma thread que faz LISTEN historico_atualizado e chama recarregar_historico_do_bd
+        quando receber notificação.
+        """
+        def listen_loop():
+            while True:
+                try:
+                    conn = conectar()
+                    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+                    cur = conn.cursor()
+                    cur.execute("LISTEN historico_atualizado;")
+                    # loop de escuta
+                    while True:
+                        if select.select([conn], [], [], 5) == ([], [], []):
+                            continue
+                        conn.poll()
+                        while conn.notifies:
+                            notify = conn.notifies.pop(0)
+                            try:
+                                self.root.after(0, lambda: self.recarregar_historico_do_bd())
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print("Erro na thread de escuta:", e)
+                    traceback.print_exc()
+                    # aguarda antes de tentar reconectar
+                    time.sleep(10)
+
+        t = threading.Thread(target=listen_loop, daemon=True)
+        t.start()
+
+    def exportar_historico_para_excel(self):
+        """
+        Exporta todo o histórico do banco para um arquivo .xlsx (pede local de salvamento).
+        """
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("SELECT id, usuario, nf, produto, quantidade, tipo, timestamp FROM calculo_historico ORDER BY timestamp;")
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao recuperar histórico para exportar: {e}")
+            return
+
+        if not rows:
+            messagebox.showinfo("Exportar Histórico", "Não há registros para exportar.")
+            return
+
+        df = pd.DataFrame(rows, columns=["id", "usuario", "nf", "produto", "quantidade", "tipo", "timestamp"])
+
+        caminho = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="Salvar histórico como..."
+        )
+        if not caminho:
+            return
+        try:
+            df.to_excel(caminho, index=False)
+            messagebox.showinfo("Exportar Histórico", f"Histórico exportado com sucesso para:\n{caminho}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao salvar o arquivo Excel: {e}")
+
+    def iniciar_rotina_purga_mensal(self):
+        """
+        Inicia uma thread que agenda aviso no final do mês para apagar a tabela de histórico.
+        """
+        def segundos_ate_proxima_purga():
+            hoje = date.today()
+            if hoje.month == 12:
+                primeiro_proximo = date(hoje.year + 1, 1, 1)
+            else:
+                primeiro_proximo = date(hoje.year, hoje.month + 1, 1)
+            ultimo_dia = primeiro_proximo - timedelta(days=1)
+            # agendamos para 23:55 do último dia do mês
+            purge_dt = datetime(ultimo_dia.year, ultimo_dia.month, ultimo_dia.day, 23, 55)
+            agora = datetime.now()
+            delta = (purge_dt - agora).total_seconds()
+            if delta < 0:
+                # já passou, agenda para mês seguinte
+                if primeiro_proximo.month == 12:
+                    fn = date(primeiro_proximo.year + 1, 1, 1)
+                else:
+                    fn = date(primeiro_proximo.year, primeiro_proximo.month + 1, 1)
+                ultimo_dia2 = fn - timedelta(days=1)
+                purge_dt = datetime(ultimo_dia2.year, ultimo_dia2.month, ultimo_dia2.day, 23, 55)
+                delta = (purge_dt - agora).total_seconds()
+            return max(60, delta)
+
+        def purge_loop():
+            while True:
+                try:
+                    wait_sec = segundos_ate_proxima_purga()
+                    time.sleep(wait_sec)
+                    try:
+                        # Corrigido: chama o método da instância
+                        self.root.after(0, self.avisar_e_purgar)
+                    except Exception:
+                        pass
+                    time.sleep(60)
+                except Exception as e:
+                    print("Erro no loop de purga:", e)
+                    traceback.print_exc()
+                    time.sleep(60)
+
+        t = threading.Thread(target=purge_loop, daemon=True)
+        t.start()
+
+    def avisar_e_purgar(self):
+        """
+        Abre diálogo avisando que o sistema irá apagar o histórico de cálculo (tabela).
+        Oferece: Exportar e Apagar / Apagar Agora / Adiar 24h
+        """
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Purge Mensal - Histórico de Cálculo")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        try:
+            aplicar_icone(dialog, "C:\\Sistema\\logos\\Kametal.ico")
+        except Exception:
+            pass
+        try:
+            centralizar_janela(dialog, 480, 200)
+        except Exception:
+            pass
+
+        ttk.Label(dialog, text="Aviso: Neste momento o sistema irá apagar o histórico de cálculo (tabela).", wraplength=440).pack(padx=10, pady=(12,6))
+        ttk.Label(dialog, text="Se desejar, exporte para Excel antes de apagar. Escolha uma opção:", wraplength=440).pack(padx=10)
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=12)
+
+        def on_export_and_delete():
+            dialog.destroy()
+            try:
+                self.exportar_historico_para_excel()
+            except Exception:
+                pass
+            self.executar_purga()
+
+        def on_delete_now():
+            dialog.destroy()
+            self.executar_purga()
+
+        def on_defer_24h():
+            dialog.destroy()
+            messagebox.showinfo("Adiado", "Purge adiado 24 horas.")
+            def delayed_call():
+                time.sleep(24*3600)
+                try:
+                    self.root.after(0, lambda: self.avisar_e_purgar())
+                except Exception:
+                    pass
+            threading.Thread(target=delayed_call, daemon=True).start()
+
+        ttk.Button(btn_frame, text="Exportar e Apagar", command=on_export_and_delete).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Apagar Agora", command=on_delete_now).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Adiar 24h", command=on_defer_24h).pack(side="left", padx=6)
+
+    def executar_purga(self):
+        """
+        Executa o DELETE na tabela calculo_historico e notifica instâncias via NOTIFY.
+        """
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM calculo_historico;")
+            conn.commit()
+            cur.execute("NOTIFY historico_atualizado, 'purge';")
+            conn.commit()
+            cur.close()
+            conn.close()
+            messagebox.showinfo("Purge Mensal", "Histórico apagado com sucesso.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao apagar histórico: {e}")
+            print("Erro no executar_purga:", e)
+            traceback.print_exc()
 
     def voltar_para_menu(self):
         """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
