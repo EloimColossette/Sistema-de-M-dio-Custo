@@ -9,6 +9,7 @@ from matplotlib.ticker import FuncFormatter
 from conexao_db import conectar, logger
 import threading
 import select
+import time
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import numpy as np
 import seaborn as sns
@@ -18,46 +19,51 @@ import pandas as pd
 import importlib
 import queue
 import traceback
+from datetime import datetime, date
+import calendar
 
 class Janela_Menu(tk.Tk):
     def __init__(self, user_id):
         super().__init__()
         self.user_id = user_id
 
-        # Conexão com o banco de dados e Permissão
-        # … seu código atual …
+        # --- Conexão com o banco de dados e Permissão ---
         self.conn = conectar()
         # Conexão separada para escutar notificações
-        self.conn_listen = conectar()  # nova conexão para o LISTEN
+        self.conn_listen = conectar()
+        # garante que pg_notify / LISTEN funcione sem commit
         self.conn_listen.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         self._cur_listen = self.conn_listen.cursor()
         self._cur_listen.execute("LISTEN canal_atualizacao;")
 
-        # Inicia a thread de escuta
-        self.encerrar = False  # <- define antes de iniciar escuta
-        self._stop_event = threading.Event()   # sinal para threads pararem
-        self._closing = False                 # evita reentrância em logout/on_closing
-        self.hora_job = None                   # garante que exista o atributo desde o início
-        self._spinner_job = None               # idem para spinner
+        # --- atributos de controle de thread / estado (existem desde o início) ---
+        self.encerrar = False
+        self._stop_event = threading.Event()
+        self._closing = False
+        self.hora_job = None
+        self._spinner_job = None
         self.atualizacao_pendente = False
-        self._thread_escuta = threading.Thread(target=self._escutar_notificacoes, daemon=True)
-        self._thread_escuta.start()
 
+        # Carrega permissões / nome (pode depender de conexões)
         self.permissoes = self.carregar_permissoes_usuario(user_id)
         self.user_name = self.carregar_nome_usuario(user_id)
 
-        # Configurações gerais da janela
+        # --- Configurações gerais da janela ---
         self.title("Tela Inicial")
         self.geometry("1200x700")
         self.configure(bg="#ecf0f1")
-        self.state("zoomed")  # Janela maximizada
+        self.state("zoomed")
         self.caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
-        aplicar_icone(self, self.caminho_icone)
+        try:
+            aplicar_icone(self, self.caminho_icone)
+        except Exception:
+            # não crítico — segue sem ícone se falhar
+            pass
 
-        # Cria os componentes da interface
+        # --- Cria os componentes da interface ---
         self._criar_sidebar()
-        self.hora_job = None  # Armazena o ID do callback do after
-        self._criar_cabecalho()
+        self.hora_job = None
+        self._criar_cabecalho()      # atenção: este método deve criar self.right_frame
         self._criar_main_content()
         self._criar_menubar()
         self._criar_menu_lateral()
@@ -70,9 +76,29 @@ class Janela_Menu(tk.Tk):
         self.notebook = ttk.Notebook(self.main_content, style="Hidden.TNotebook")
         self.notebook.pack(fill="both", expand=True)
 
+        # --- Configurações do sistema de aviso de purga ---
+        # thresholds (ajuste conforme desejar)
+        self.purge_warning_days = 7
+        self.purge_critical_days = 3
+
+        # estado do flash
+        self._purge_flashing = False
+        self._purge_flash_state = False
+        self._last_purge_days = None
+
         # cria abas mínimas (placeholder)
         self._criar_abas_minimal()
-        self.update_idletasks()  # garante que o placeholder apareça rápido
+        self.update_idletasks()
+
+        # primeira verificação da purga — garante badge correta antes da thread iniciar
+        try:
+            self.check_purge_status()
+        except Exception as e:
+            print("Erro em check_purge_status() na inicialização:", e)
+
+        # --- Agora sim: Inicia a thread de escuta APÓS os widgets existirem ---
+        self._thread_escuta = threading.Thread(target=self._escutar_notificacoes, daemon=True)
+        self._thread_escuta.start()
 
         # agenda carregamento pesado em segundo plano
         def _carregar_abas_pesadas():
@@ -87,14 +113,14 @@ class Janela_Menu(tk.Tk):
         # sincroniza barra de abas
         self._atualizar_barra_abas()
 
-        # --- adiciona o prewarm aqui (opção imediata) ---
+        # prewarm modules (opcional)
         self.prewarm_modules([
             "Base_produto", "Base_material", "Saida_NF", "Insercao_NF",
             "usuario", "Estoque", "media_custo", "relatorio_saida",
             "relatorio_cotacao", "registro_teste"
         ])
 
-        # Atualiza estilos ao recuperar o foco e fecha o programa corretamente
+        # binds / fechamento
         self.bind("<FocusIn>", lambda e: self.configurar_estilos())
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -156,7 +182,7 @@ class Janela_Menu(tk.Tk):
         self.sidebar_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _criar_cabecalho(self):
-        """Cria o cabeçalho com a data (no formato DD/MM/YYYY), Hora, Título centralizado e Botão Atualizar à direita."""
+        """Cria o cabeçalho com a data, hora, título e botões à direita."""
         self.cabecalho = tk.Frame(self, bg="#34495e", height=80)
         self.cabecalho.pack(side="top", fill="x")
 
@@ -169,37 +195,66 @@ class Janela_Menu(tk.Tk):
         self.info_frame = tk.Frame(self.cabecalho, bg="#34495e")
         self.info_frame.grid(row=0, column=0, padx=15, sticky="w")
 
-        # Rótulo para Data (apenas números, formato DD/MM/YYYY)
         self.data_label = tk.Label(
             self.info_frame, text="", fg="white", bg="#34495e",
             font=("Helvetica", 16, "bold")
         )
         self.data_label.pack(side="top", anchor="w")
 
-        # Rótulo para Hora (fonte maior e destacada)
         self.hora_label = tk.Label(
             self.info_frame, text="", fg="#f1c40f", bg="#34495e",
             font=("Helvetica", 16, "bold")
         )
         self.hora_label.pack(side="top", anchor="w")
 
-        # Coluna 1: Título centralizado
+        # Coluna 1: título centralizado
         titulo_label = tk.Label(
             self.cabecalho, text="Sistema Kametal", fg="white", bg="#34495e",
             font=("Helvetica", 26, "bold")
         )
         titulo_label.grid(row=0, column=1, padx=10)
 
-        # Coluna 2: Botão Atualizar, alinhado à direita
+        # Coluna 2: lado direito
+        self.right_frame = tk.Frame(self.cabecalho, bg="#34495e")
+        self.right_frame.grid(row=0, column=2, padx=10, sticky="e")
+
+        # Botão Atualizar
         self.botao_atualizar = tk.Button(
-            self.cabecalho, text="Atualizar", fg="white", bg="#2980b9",
+            self.right_frame, text="Atualizar", fg="white", bg="#2980b9",
             font=("Helvetica", 12, "bold"), bd=0, relief="flat", command=self.atualizar_pagina
         )
         self.botao_atualizar.bind("<Enter>", lambda e: self.botao_atualizar.config(bg="#3498db"))
         self.botao_atualizar.bind("<Leave>", lambda e: self.botao_atualizar.config(bg="#2980b9"))
-        self.botao_atualizar.grid(row=0, column=2, padx=10, sticky="e")
+        self.botao_atualizar.pack(side="right", padx=(8, 0))
 
-        # Inicia a atualização do relógio
+        # Frame para sino
+        self.purge_frame = tk.Frame(self.right_frame, bg="#34495e")
+        self.purge_frame.pack(side="right", padx=(0, 4))
+
+        # Botão sino
+        self.purge_btn = tk.Button(
+            self.purge_frame, text="🔔", fg="white", bg="#34495e",
+            font=("Helvetica", 18), bd=0, relief="flat", command=self.mostrar_aviso_purga
+        )
+        self.purge_btn.pack(side="right")
+
+        # Badge vermelho (notificação)
+        self.purge_badge = tk.Label(
+            self.purge_frame, text="", bg="#e74c3c", fg="white",
+            font=("Helvetica", 8, "bold"), padx=4, pady=0
+        )
+        self.purge_badge.place(in_=self.purge_btn, relx=1.0, rely=0.0, anchor="ne", x=0, y=0)
+        self.purge_badge.place_forget()  # começa escondido
+
+        # Badge amarelo (exemplo: alerta adicional)
+        self.purge_badge_amarelo = tk.Label(
+            self.purge_frame, text="", bg="#f1c40f", fg="black",
+            font=("Helvetica", 8, "bold"), padx=4, pady=0
+        )
+        self.purge_badge_amarelo.place(in_=self.purge_btn, relx=0.7, rely=0.0, anchor="ne", x=0, y=0)
+        self.purge_badge_amarelo.place_forget()  # começa escondido
+
+        # Atualiza hora inicial
         self.atualizar_hora()
 
     def atualizar_hora(self):
@@ -213,6 +268,130 @@ class Janela_Menu(tk.Tk):
         # Armazena o ID do callback para que ele possa ser cancelado depois
         self.hora_job = self.after(1000, self.atualizar_hora)
 
+    def criar_widgets_purge(self):
+        # método só para manter estrutura — chamamos check direto no init
+        self.check_purge_status()
+
+    def check_purge_status(self, dias_aviso=None):
+        """
+        Atualiza a badge com base nos dias restantes até o fim do mês.
+        - mostra nada se maior que purge_warning_days
+        - mostra badge amarela se <= purge_warning_days
+        - mostra badge vermelha + piscar se <= purge_critical_days
+        """
+        try:
+            if dias_aviso is None:
+                dias_aviso = self.purge_warning_days
+
+            hoje = date.today()
+            ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+            dias_restantes = ultimo_dia - hoje.day
+
+            # se for maior que aviso -> esconde badge e para flash
+            if dias_restantes > self.purge_warning_days:
+                if self.purge_badge.winfo_ismapped():
+                    self.purge_badge.pack_forget()
+                # parar flash se estava piscando
+                if self._purge_flashing:
+                    self._purge_flashing = False
+                    try:
+                        self.purge_badge.config(bg="#f1c40f", fg="black")
+                    except Exception:
+                        pass
+            else:
+                # mostra badge com número
+                self.purge_badge.config(text=str(dias_restantes))
+                if not self.purge_badge.winfo_ismapped():
+                    self.purge_badge.pack(side="right", padx=(0, 6))
+
+                # crítico?
+                if dias_restantes <= self.purge_critical_days:
+                    # cor vermelha e inicia flash
+                    self.purge_badge.config(bg="#e74c3c", fg="white")
+                    if not self._purge_flashing:
+                        self._purge_flashing = True
+                        self._purge_flash_state = False
+                        self._flash_purge_badge()
+                else:
+                    # nível aviso (amarelo)
+                    self.purge_badge.config(bg="#f1c40f", fg="black")
+                    if self._purge_flashing:
+                        self._purge_flashing = False
+                        self.purge_badge.config(bg="#f1c40f", fg="black")
+
+            # --- Agendar próxima checagem (10 minutos) ---
+            try:
+                # cancela agendamento anterior se existir
+                if hasattr(self, "_purge_job") and self._purge_job:
+                    try:
+                        self.after_cancel(self._purge_job)
+                    except Exception:
+                        pass
+                # só agenda se a janela ainda existir
+                if self.winfo_exists():
+                    self._purge_job = self.after(10 * 60 * 1000, self.check_purge_status)
+            except Exception:
+                pass
+
+        except Exception as e:
+            print("Erro em check_purge_status:", e)
+
+    def _flash_purge_badge(self):
+        """
+        Efeito de piscar da badge — alterna visibilidade/leves cores.
+        Só continua enquanto self._purge_flashing for True.
+        """
+        try:
+            if not getattr(self, "_purge_flashing", False):
+                # garantir que a badge fique com cor crítica sólida ao terminar
+                try:
+                    self.purge_badge.config(bg="#e74c3c", fg="white")
+                except Exception:
+                    pass
+                return
+
+            # alterna entre dois estados visuais
+            if self._purge_flash_state:
+                # estado "acendido"
+                self.purge_badge.config(bg="#e74c3c", fg="white")
+            else:
+                # estado "apagadinho" (tom mais claro)
+                self.purge_badge.config(bg="#ff9999", fg="white")
+
+            self._purge_flash_state = not self._purge_flash_state
+            # chama de novo em 700ms
+            self.after(700, self._flash_purge_badge)
+        except Exception as e:
+            print("Erro no flash da badge:", e)
+
+    def mostrar_aviso_purga(self):
+        """
+        Mostra uma messagebox explicando o aviso.
+        Para evitar spam, só mostra popup no nível CRÍTICO ou se o usuário clicar manualmente.
+        """
+        try:
+            hoje = date.today()
+            ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+            dias_restantes = ultimo_dia - hoje.day
+
+            texto = (
+                f"Faltam {dias_restantes} dias para a purga mensal do Histórico de Cálculo.\n\n"
+                "Os registros da janela 'Cálculo de NFs' serão apagados automaticamente na virada do mês.\n\n"
+                "Recomenda-se exportar os dados (Exportar Excel) se quiser mantê-los."
+            )
+
+            # Se for crítico e já não mostramos esse mesmo dia, mostramos automaticamente.
+            if dias_restantes <= self.purge_critical_days and self._last_purge_days != dias_restantes:
+                messagebox.showwarning("ATENÇÃO — Purga Mensal Aproximando", texto)
+                self._last_purge_days = dias_restantes
+            else:
+                # se o usuário clicou manualmente, mostramos mesmo que não crítico
+                messagebox.showinfo("Aviso: Purga Mensal", texto)
+                self._last_purge_days = dias_restantes
+
+        except Exception as e:
+            print("Erro em mostrar_aviso_purga:", e)
+
     def destroy(self):
         """Cancela callbacks e sinaliza threads antes de destruir a janela."""
         try:
@@ -220,6 +399,18 @@ class Janela_Menu(tk.Tk):
         except Exception:
             pass
 
+        # cancela agendamento de check_purge_status
+        try:
+            if hasattr(self, "_purge_job") and self._purge_job:
+                try:
+                    self.after_cancel(self._purge_job)
+                except Exception:
+                    pass
+                self._purge_job = None
+        except Exception:
+            pass
+
+        # cancela outros agendamentos
         try:
             if getattr(self, "hora_job", None):
                 try:
@@ -250,6 +441,7 @@ class Janela_Menu(tk.Tk):
         except Exception:
             pass
 
+        # destrói janela base
         try:
             super(type(self), self).destroy()
         except tk.TclError:
@@ -579,31 +771,107 @@ class Janela_Menu(tk.Tk):
             return ""
 
     def _escutar_notificacoes(self):
+        """
+        Thread que fica escutando NOTIFY do Postgres (self.conn_listen).
+        - Processa notificações imediatamente dentro do loop, evitando UnboundLocalError.
+        - Quando receber payloads relacionados à purga, força atualização do badge via self.after().
+        - Agenda atualizar_pagina() na thread principal quando apropriado.
+        """
         try:
+            # loop principal da thread de escuta
             while not getattr(self, "encerrar", False) and not getattr(self, "_stop_event", threading.Event()).is_set():
                 try:
-                    # select bloqueia por 1s (como você já tinha)
-                    select.select([self.conn_listen], [], [], 1)
-                    self.conn_listen.poll()
-                    while self.conn_listen.notifies:
-                        notify = self.conn_listen.notifies.pop(0)
-                        print(f"[NOTIFY] {notify.channel}: {notify.payload}")
+                    # espera até 1 segundo por atividade (ajustável)
+                    try:
+                        ready = select.select([self.conn_listen], [], [], 1)
+                    except Exception:
+                        # se select falhar (por exemplo self.conn_listen inválido), pausa e continua
+                        time.sleep(1)
+                        continue
+
+                    # faz poll da conexão para popular conn_listen.notifies
+                    try:
+                        self.conn_listen.poll()
+                    except Exception:
+                        # possível que a conexão tenha sido fechada — apenas ignore e continue
+                        time.sleep(1)
+                        continue
+
+                    # processa todas as notificações pendentes
+                    while getattr(self.conn_listen, "notifies", None):
+                        notify = None
                         try:
-                            existe = self.winfo_exists()
-                        except tk.TclError:
-                            existe = False
-                        if not getattr(self, "atualizacao_pendente", False) and existe:
-                            self.atualizacao_pendente = True
-                            try:
-                                self.after(100, self.atualizar_pagina)
-                            except tk.TclError:
-                                # janela já fechada -> ignora
-                                pass
-                except Exception as e:
-                    # se estiver encerrando, ignora erros transitórios
+                            notify = self.conn_listen.notifies.pop(0)
+                        except Exception:
+                            # nenhum notify real -> sai do while
+                            break
+
+                        # DEBUG: print para acompanhar no console
+                        try:
+                            print(f"[NOTIFY] canal={getattr(notify, 'channel', '')} payload={getattr(notify, 'payload', '')}")
+                        except Exception:
+                            pass
+
+                        # processa payload do notify AQUI (onde 'notify' existe)
+                        try:
+                            payload = getattr(notify, "payload", "") or ""
+                            # formato esperado: "purge:3" ou "purge_warning" ou "menu_atualizado"
+                            if payload.startswith("purge:"):
+                                # extrai número de dias (se possível) e força atualização imediata
+                                try:
+                                    dias = int(payload.split(":", 1)[1])
+                                except Exception:
+                                    dias = None
+                                # atualiza badge/estado na thread principal
+                                try:
+                                    if dias is not None and getattr(self, "purge_badge", None):
+                                        self.after(50, lambda d=dias: self.purge_badge.config(text=str(d)))
+                                    # recalcula corretamente e ajusta visual
+                                    self.after(100, self.check_purge_status)
+                                except Exception:
+                                    pass
+
+                            elif payload in ("purge_warning", "purge"):
+                                # apenas rechecagem da purga
+                                try:
+                                    self.after(100, self.check_purge_status)
+                                except Exception:
+                                    pass
+
+                            elif payload == "menu_atualizado":
+                                # força atualização completa da página (abas, sidebar, quick views)
+                                try:
+                                    self.after(100, self.atualizar_pagina)
+                                except Exception:
+                                    pass
+
+                            else:
+                                # outros payloads genéricos -> atualizar página
+                                try:
+                                    existe = False
+                                    try:
+                                        existe = self.winfo_exists()
+                                    except Exception:
+                                        existe = False
+
+                                    if existe:
+                                        self.after(150, self.atualizar_pagina)
+                                except Exception:
+                                    pass
+
+                        except Exception as e_notify:
+                            # falha ao processar um notify específico — loga e continua
+                            print("Erro ao processar notify:", e_notify)
+
+                except Exception as e_loop:
+                    # erro transitório no loop de select/poll
                     if not getattr(self, "encerrar", False) and not getattr(self, "_stop_event", threading.Event()).is_set():
-                        print(f"[Erro na escuta]: {e}")
+                        print(f"[Erro na thread de escuta]: {e_loop}")
+                    # pequena pausa antes de tentar novamente
+                    time.sleep(1)
+
         except Exception as e_outer:
+            # se a thread morrer por erro não esperado, loga
             print(f"[Erro crítico na thread de escuta]: {e_outer}")
 
     def atualizar_pagina(self):

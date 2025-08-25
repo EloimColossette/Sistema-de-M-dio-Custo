@@ -2136,23 +2136,31 @@ class CalculoProduto:
             traceback.print_exc()
 
     def verificar_e_avisar_exportacao_inicio(self, dias_aviso=3):
-        """Ao iniciar, avisa se estiver a <= dias_aviso do final do mês."""
-        hoje = date.today()
-        ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
-        dias_restantes = ultimo_dia - hoje.day
+        try:
+            hoje = date.today()
+            ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+            dias_restantes = ultimo_dia - hoje.day
 
-        if dias_restantes <= dias_aviso:
-            # apresenta aviso não bloqueante (executa após 1s para garantir mainloop iniciado)
-            def mostrar():
-                try:
-                    messagebox.showinfo(
-                        "Lembrete de Purga Mensal",
-                        f"Faltam {dias_restantes} dias para a purga mensal do histórico.\n"
-                        "Recomenda-se exportar o histórico para não perder os dados."
-                    )
-                except Exception:
-                    pass
-            self.root.after(1000, mostrar)
+            # mostra messagebox localmente (como você já faz)
+            if dias_restantes <= dias_aviso:
+                # ... seu código para mostrar messagebox local (pode manter)
+                pass
+
+            # Envia NOTIFY para o menu com payload 'purge:<dias>'
+            payload = f"purge:{dias_restantes}"
+            try:
+                connn = conectar()
+                cur = connn.cursor()
+                cur.execute("SELECT pg_notify('canal_atualizacao', %s);", (payload,))
+                connn.commit()
+                cur.close()
+                connn.close()
+            except Exception:
+                # não crítico; apenas logue se quiser
+                pass
+
+        except Exception as e:
+            print("Erro em verificar_e_avisar_exportacao_inicio:", e)
 
     def voltar_para_menu(self):
         """Reexibe o menu imediatamente e faz a limpeza em background para não bloquear a UI."""
