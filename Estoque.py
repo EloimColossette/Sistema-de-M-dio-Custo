@@ -101,7 +101,7 @@ class CalculoProduto:
         # garante que, se o treeview já existir, receba o estilo e altura desejada
         if hasattr(self, "treeview"):
             try:
-                self.treeview.config(style="Treeview", height=22)
+                self.treeview.config(style="Treeview", height=15)  # volta pra 15, como antes
             except Exception:
                 pass
     
