@@ -48,35 +48,62 @@ class CalculoProduto:
         self.criar_widgets()
         self.carregar_dados_iniciais()
 
-        # # garante que a pasta 'config' exista
-        # config_dir = os.path.join(os.path.dirname(__file__), "config")
-        # os.makedirs(config_dir, exist_ok=True)
-
-        # # caminho do arquivo de histórico local dentro da pasta config
-        # self.history_path = os.path.join(config_dir, "History_Calculo.json")
-        # self.history = self.load_history()
-
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # reaplica estilo ao ser exibida ou ao ganhar foco — não cria função nova
+        self.root.bind("<Map>", lambda e: self.configurar_estilo())
+        self.root.bind("<FocusIn>", lambda e: self.configurar_estilo())
 
         # Chama a função que reorganiza os IDs ao inicializar a janela
         self.reiniciar_ids_estoque()
 
+    # ----- substituir a função configurar_estilo existente por esta -----
     def configurar_estilo(self):
-        self.style = ttk.Style(self.root)
-        self.style.theme_use("alt")
-        self.style.configure("Treeview", 
-                            background="white", 
-                            foreground="black", 
-                            rowheight=27, 
-                            fieldbackground="white")
-        self.style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
-        self.style.map("Treeview", 
-                    background=[("selected", "#0078D7")], 
-                    foreground=[("selected", "white")])
-        
-        # Configura o Treeview com o mesmo estilo e 23 linhas visíveis
+        # usa o Style global (sem amarrar ao Toplevel) para garantir que theme_use afete tudo
+        self.style = ttk.Style()
+        try:
+            # força o theme desejado (igual à primeira imagem)
+            self.style.theme_use("alt")
+        except Exception:
+            pass
+
+        # configura Treeview globalmente do jeito que você quer
+        try:
+            self.style.configure("Treeview",
+                                background="white",
+                                foreground="black",
+                                rowheight=27,
+                                fieldbackground="white",
+                                font=("Arial", 10))
+        except Exception:
+            # se algum option não for suportado na plataforma, ignora
+            try:
+                self.style.configure("Treeview",
+                                    background="white",
+                                    foreground="black",
+                                    rowheight=27,
+                                    fieldbackground="white")
+            except Exception:
+                pass
+
+        try:
+            self.style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
+        except Exception:
+            pass
+
+        try:
+            self.style.map("Treeview",
+                        background=[("selected", "#0078D7")],
+                        foreground=[("selected", "white")])
+        except Exception:
+            pass
+
+        # garante que, se o treeview já existir, receba o estilo e altura desejada
         if hasattr(self, "treeview"):
-            self.treeview.config(style="Treeview", height=22)
+            try:
+                self.treeview.config(style="Treeview", height=22)
+            except Exception:
+                pass
     
     def criar_widgets(self):
         # Frame superior para entradas
