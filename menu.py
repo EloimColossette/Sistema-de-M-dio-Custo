@@ -1735,10 +1735,18 @@ class Janela_Menu(tk.Tk):
     def logout(self):
         """Logout seguro: sinaliza encerrar, cancela afters, fecha conexões e destrói a janela."""
         from login import TelaLogin
+
         # evita reentrância
         if getattr(self, "_closing", False):
             return
         self._closing = True
+
+        # remove temporariamente o handler WM_DELETE_WINDOW para evitar que o
+        # gerenciador de janelas chame on_closing durante o teardown
+        try:
+            self.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
 
         try:
             self._cleanup()
@@ -1747,13 +1755,17 @@ class Janela_Menu(tk.Tk):
 
         # destruir janela com segurança
         try:
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
             super(type(self), self).destroy()
         except tk.TclError:
             pass
         except Exception:
             pass
 
-        # tenta abrir login
+        # abrir login; se falhar, mostra no console
         try:
             TelaLogin().run()
         except Exception as e:
@@ -1834,8 +1846,20 @@ class Janela_Menu(tk.Tk):
             return
         self._closing = True
 
+        # desliga o handler de WM_DELETE_WINDOW para evitar que callbacks
+        # sejam chamados novamente durante o destroy
+        try:
+            self.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+
         if not messagebox.askyesno("Fechar", "Tem certeza que deseja fechar esta janela?"):
             self._closing = False
+            # restaura handler padrão
+            try:
+                self.protocol("WM_DELETE_WINDOW", self.on_closing)
+            except Exception:
+                pass
             return
 
         try:
@@ -1845,6 +1869,11 @@ class Janela_Menu(tk.Tk):
 
         # destruir a janela com segurança
         try:
+            # garante redraw/flush antes de destruir
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
             super(type(self), self).destroy()
         except tk.TclError:
             pass
