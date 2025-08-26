@@ -825,18 +825,19 @@ class Janela_Menu(tk.Tk):
 
                 self.buttons.append((button, internal_name, shadow))
 
-        # 6) --- Rodapé com versão (colado no fim da tela) ---
-        footer = tk.Frame(self.sidebar_inner, bg="#1a252f")
-        footer.pack(side="bottom", fill="x", pady=10)
+        # 6) --- Rodapé com versão (barra inferior da janela inteira) ---
+        # Use self.root (ou self.master) para ligar ao topo da janela principal
+        top = self.sidebar_inner.winfo_toplevel()
 
         versao_label = tk.Label(
-            footer,
+            top,
             text=f"Versão {__version__}",
-            bg="#1a252f",
+            bg="#1b2e3f",
             fg="lightgray",
             font=("Helvetica", 9)
         )
-        versao_label.pack(anchor="w", padx=10)  # <- alinhado à esquerda
+        # canto inferior esquerdo (10px de margem)
+        versao_label.place(relx=0.0, rely=1.0, x=10, y=-10, anchor="sw")
 
     def _criar_abas(self):
         """Cria as abas do Notebook conforme self.permissoes e popula cada uma."""
