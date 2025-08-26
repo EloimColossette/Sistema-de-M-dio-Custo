@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from logos import aplicar_icone
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -16,10 +16,11 @@ import seaborn as sns
 import mplcursors
 from datetime import datetime
 import pandas as pd
+import pandas.api.types as ptypes
 import importlib
 import queue
 import traceback
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 import calendar
 
 class Janela_Menu(tk.Tk):
@@ -81,6 +82,9 @@ class Janela_Menu(tk.Tk):
         self.purge_warning_days = 7
         self.purge_critical_days = 3
 
+        # flag para evitar abrir o modal automaticamente várias vezes no mesmo ciclo
+        self._auto_purge_modal_shown = False
+
         # estado do flash
         self._purge_flashing = False
         self._purge_flash_state = False
@@ -90,11 +94,19 @@ class Janela_Menu(tk.Tk):
         self._criar_abas_minimal()
         self.update_idletasks()
 
-        # primeira verificação da purga — garante badge correta antes da thread iniciar
-        try:
-            self.check_purge_status()
-        except Exception as e:
-            print("Erro em check_purge_status() na inicialização:", e)
+        # --- somente inicializa o sistema de purga se o usuário tiver permissão ---
+        if "Calculo_Produto" in self.permissoes:
+            try:
+                # primeira verificação da purga — garante badge correta antes da thread iniciar
+                self.check_purge_status()
+            except Exception as e:
+                print("Erro em check_purge_status() na inicialização:", e)
+        else:
+            # garante que os atributos existam mesmo quando não houver permissão
+            self.purge_frame = None
+            self.purge_btn = None
+            self.purge_badge = None
+            self.purge_badge_amarelo = None
 
         # --- Agora sim: Inicia a thread de escuta APÓS os widgets existirem ---
         self._thread_escuta = threading.Thread(target=self._escutar_notificacoes, daemon=True)
@@ -186,7 +198,7 @@ class Janela_Menu(tk.Tk):
         self.cabecalho = tk.Frame(self, bg="#34495e", height=80)
         self.cabecalho.pack(side="top", fill="x")
 
-        # Configuração da grid para 3 colunas
+        # grid 3 colunas...
         self.cabecalho.columnconfigure(0, weight=1)
         self.cabecalho.columnconfigure(1, weight=2)
         self.cabecalho.columnconfigure(2, weight=1)
@@ -195,30 +207,24 @@ class Janela_Menu(tk.Tk):
         self.info_frame = tk.Frame(self.cabecalho, bg="#34495e")
         self.info_frame.grid(row=0, column=0, padx=15, sticky="w")
 
-        self.data_label = tk.Label(
-            self.info_frame, text="", fg="white", bg="#34495e",
-            font=("Helvetica", 16, "bold")
-        )
+        self.data_label = tk.Label(self.info_frame, text="", fg="white", bg="#34495e",
+                                   font=("Helvetica", 16, "bold"))
         self.data_label.pack(side="top", anchor="w")
 
-        self.hora_label = tk.Label(
-            self.info_frame, text="", fg="#f1c40f", bg="#34495e",
-            font=("Helvetica", 16, "bold")
-        )
+        self.hora_label = tk.Label(self.info_frame, text="", fg="#f1c40f", bg="#34495e",
+                                   font=("Helvetica", 16, "bold"))
         self.hora_label.pack(side="top", anchor="w")
 
         # Coluna 1: título centralizado
-        titulo_label = tk.Label(
-            self.cabecalho, text="Sistema Kametal", fg="white", bg="#34495e",
-            font=("Helvetica", 26, "bold")
-        )
+        titulo_label = tk.Label(self.cabecalho, text="Sistema Kametal", fg="white", bg="#34495e",
+                                font=("Helvetica", 26, "bold"))
         titulo_label.grid(row=0, column=1, padx=10)
 
         # Coluna 2: lado direito
         self.right_frame = tk.Frame(self.cabecalho, bg="#34495e")
         self.right_frame.grid(row=0, column=2, padx=10, sticky="e")
 
-        # Botão Atualizar
+        # Botão Atualizar (sempre visível)
         self.botao_atualizar = tk.Button(
             self.right_frame, text="Atualizar", fg="white", bg="#2980b9",
             font=("Helvetica", 12, "bold"), bd=0, relief="flat", command=self.atualizar_pagina
@@ -227,32 +233,40 @@ class Janela_Menu(tk.Tk):
         self.botao_atualizar.bind("<Leave>", lambda e: self.botao_atualizar.config(bg="#2980b9"))
         self.botao_atualizar.pack(side="right", padx=(8, 0))
 
-        # Frame para sino
-        self.purge_frame = tk.Frame(self.right_frame, bg="#34495e")
-        self.purge_frame.pack(side="right", padx=(0, 4))
+        # --- só cria o sino/badges se o usuário tiver a permissão para Cálculo de NFs ---
+        if "Calculo_Produto" in self.permissoes:
+            self.purge_frame = tk.Frame(self.right_frame, bg="#34495e")
+            self.purge_frame.pack(side="right", padx=(0, 4))
 
-        # Botão sino
-        self.purge_btn = tk.Button(
-            self.purge_frame, text="🔔", fg="white", bg="#34495e",
-            font=("Helvetica", 18), bd=0, relief="flat", command=self.mostrar_aviso_purga
-        )
-        self.purge_btn.pack(side="right")
+            # Botão sino
+            self.purge_btn = tk.Button(
+                self.purge_frame, text="🔔", fg="white", bg="#34495e",
+                font=("Helvetica", 18), bd=0, relief="flat", 
+                command=lambda: self.mostrar_aviso_purga(force=True)
+            )
+            self.purge_btn.pack(side="right")
 
-        # Badge vermelho (notificação)
-        self.purge_badge = tk.Label(
-            self.purge_frame, text="", bg="#e74c3c", fg="white",
-            font=("Helvetica", 8, "bold"), padx=4, pady=0
-        )
-        self.purge_badge.place(in_=self.purge_btn, relx=1.0, rely=0.0, anchor="ne", x=0, y=0)
-        self.purge_badge.place_forget()  # começa escondido
+            # Badge vermelho (notificação)
+            self.purge_badge = tk.Label(
+                self.purge_frame, text="", bg="#e74c3c", fg="white",
+                font=("Helvetica", 8, "bold"), padx=4, pady=0
+            )
+            self.purge_badge.place(in_=self.purge_btn, relx=1.0, rely=0.0, anchor="ne", x=0, y=0)
+            self.purge_badge.place_forget()  # começa escondido
 
-        # Badge amarelo (exemplo: alerta adicional)
-        self.purge_badge_amarelo = tk.Label(
-            self.purge_frame, text="", bg="#f1c40f", fg="black",
-            font=("Helvetica", 8, "bold"), padx=4, pady=0
-        )
-        self.purge_badge_amarelo.place(in_=self.purge_btn, relx=0.7, rely=0.0, anchor="ne", x=0, y=0)
-        self.purge_badge_amarelo.place_forget()  # começa escondido
+            # Badge amarelo (opcional)
+            self.purge_badge_amarelo = tk.Label(
+                self.purge_frame, text="", bg="#f1c40f", fg="black",
+                font=("Helvetica", 8, "bold"), padx=4, pady=0
+            )
+            self.purge_badge_amarelo.place(in_=self.purge_btn, relx=0.7, rely=0.0, anchor="ne", x=0, y=0)
+            self.purge_badge_amarelo.place_forget()
+        else:
+            # define None para evitar AttributeError em outros trechos
+            self.purge_frame = None
+            self.purge_btn = None
+            self.purge_badge = None
+            self.purge_badge_amarelo = None
 
         # Atualiza hora inicial
         self.atualizar_hora()
@@ -278,7 +292,12 @@ class Janela_Menu(tk.Tk):
         - mostra nada se maior que purge_warning_days
         - mostra badge amarela se <= purge_warning_days
         - mostra badge vermelha + piscar se <= purge_critical_days
+        - abre automaticamente o modal **uma vez** quando faltar 2 dias ou menos
         """
+        # Proteção: não faz nada se o usuário não tiver a permissão (ou se os widgets não existirem)
+        if "Calculo_Produto" not in self.permissoes or getattr(self, "purge_badge", None) is None:
+            return
+        
         try:
             if dias_aviso is None:
                 dias_aviso = self.purge_warning_days
@@ -318,6 +337,27 @@ class Janela_Menu(tk.Tk):
                     if self._purge_flashing:
                         self._purge_flashing = False
                         self.purge_badge.config(bg="#f1c40f", fg="black")
+
+            # --- ABRIR AUTOMATICAMENTE O MODAL quando faltar 2 dias ou menos ---
+            try:
+                # se faltar 2 dias ou menos e ainda não abrimos automaticamente, abre modal
+                if dias_restantes <= 2 and not getattr(self, "_auto_purge_modal_shown", False):
+                    # usa after para garantir que a chamada ocorra na thread principal de UI
+                    try:
+                        self.after(200, lambda: self.mostrar_aviso_purga(force=False))
+                    except Exception:
+                        # fallback direto (pelo menos tenta)
+                        try:
+                            self.mostrar_aviso_purga(force=False)
+                        except Exception:
+                            pass
+                    # marca como já mostrado para não ficar abrindo repetidamente
+                    self._auto_purge_modal_shown = True
+                # se estamos acima de 2 dias, resetamos a flag (próximo mês / novo ciclo)
+                elif dias_restantes > 2:
+                    self._auto_purge_modal_shown = False
+            except Exception:
+                pass
 
             # --- Agendar próxima checagem (10 minutos) ---
             try:
@@ -364,33 +404,279 @@ class Janela_Menu(tk.Tk):
         except Exception as e:
             print("Erro no flash da badge:", e)
 
-    def mostrar_aviso_purga(self):
+    def mostrar_aviso_purga(self, force: bool = False):
         """
-        Mostra uma messagebox explicando o aviso.
-        Para evitar spam, só mostra popup no nível CRÍTICO ou se o usuário clicar manualmente.
+        Modal profissional e legível para o usuário sobre a limpeza mensal de registros.
+        force=True  -> usuário clicou no sino -> sempre abre
+        force=False -> automático -> abre somente se crítico
         """
+        if "Calculo_Produto" not in self.permissoes:
+            return
+        
         try:
             hoje = date.today()
             ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
             dias_restantes = ultimo_dia - hoje.day
 
-            texto = (
-                f"Faltam {dias_restantes} dias para a purga mensal do Histórico de Cálculo.\n\n"
-                "Os registros da janela 'Cálculo de NFs' serão apagados automaticamente na virada do mês.\n\n"
-                "Recomenda-se exportar os dados (Exportar Excel) se quiser mantê-los."
-            )
+            # Se não for forçado e não estiver em nível de aviso, não abre modal
+            if not force and dias_restantes > self.purge_warning_days:
+                return
 
-            # Se for crítico e já não mostramos esse mesmo dia, mostramos automaticamente.
-            if dias_restantes <= self.purge_critical_days and self._last_purge_days != dias_restantes:
-                messagebox.showwarning("ATENÇÃO — Purga Mensal Aproximando", texto)
-                self._last_purge_days = dias_restantes
+            # resumo (consulta segura ao banco)
+            resumo = self._get_purge_summary_safe()
+
+            # se automático e não crítico, mostra caixa simples
+            if not force and dias_restantes > self.purge_critical_days:
+                texto_simples = (
+                    f"Faltam {dias_restantes} dia(s) para a limpeza mensal (remoção automática) dos registros do Histórico de Cálculo."
+                    "\n\nSe quiser manter seus registros, use a opção Exportar antes da data indicada."
+                )
+                messagebox.showinfo("Aviso: Limpeza Mensal de Registros", texto_simples)
+                return
+
+            # --- janela modal ---
+            modal = tk.Toplevel(self)
+            modal.title("Limpeza Mensal de Registros")
+            modal.transient(self)
+            modal.grab_set()
+            modal.resizable(False, False)
+
+            # garante que toda a área de conteúdo da janela seja branca
+            modal.configure(bg="white")
+
+            w, h = 640, 380
+            x = max(0, (self.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (self.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+
+            try:
+                aplicar_icone(modal, self.caminho_icone)
+            except Exception:
+                pass
+
+            # --- estilos locais (com prefixo exclusivo para este modal) ---
+            style = ttk.Style(modal)
+            prefix = f"Purge{modal.winfo_id()}"  # id único da janela
+
+            style.configure(f"{prefix}.Header.TLabel",
+                            font=("Helvetica", 14, "bold"))
+            style.configure(f"{prefix}.BodyWhite.TLabel",
+                            font=("Helvetica", 11),
+                            background="white", foreground="black")
+            style.configure(f"{prefix}.DaysWhite.TLabel",
+                            font=("Helvetica", 28, "bold"),
+                            background="white", foreground="#c0392b")
+
+            # cabeçalho (mantém escuro para destacar)
+            header = tk.Frame(modal, bg="#2c3e50", height=72)
+            header.pack(side="top", fill="x")
+            tk.Label(header, text="🗑️", bg="#2c3e50", fg="white",
+                    font=("Helvetica", 18)).pack(side="left", padx=12, pady=10)
+            tk.Label(header, text="Limpeza Mensal de Registros", bg="#2c3e50", fg="white",
+                    font=("Helvetica", 16, "bold")).pack(side="left", pady=10)
+
+            # conteúdo (fundo branco)
+            content = tk.Frame(modal, bg="white", padx=12, pady=12)
+            content.pack(fill="both", expand=True)
+
+            # mensagem e dias
+            top = tk.Frame(content, bg="white")
+            top.pack(fill="x", pady=(0, 10))
+            msg = (
+                f"Faltam {dias_restantes} dia(s) para a limpeza mensal (remoção automática) dos registros\n"
+                "do Histórico de Cálculo.\n\n"
+                "O sistema removerá automaticamente esses registros na virada do mês para liberar espaço.\n"
+                "Se quiser manter os dados, exporte-os agora."
+            )
+            ttk.Label(top, text=msg, style=f"{prefix}.BodyWhite.TLabel",
+                    wraplength=420, justify="left").pack(side="left", anchor="nw")
+            ttk.Label(top, text=str(dias_restantes),
+                    style=f"{prefix}.DaysWhite.TLabel").pack(side="right", anchor="ne", padx=6)
+
+            # progress bar
+            pb_frame = tk.Frame(content, bg="white")
+            pb_frame.pack(fill="x", pady=(0, 8))
+            ttk.Label(pb_frame, text="Progresso do mês:",
+                    style=f"{prefix}.BodyWhite.TLabel").pack(anchor="w")
+            progress = ttk.Progressbar(
+                pb_frame, orient="horizontal", mode="determinate", length=560)
+            progress.pack(pady=4)
+            dias_passados = hoje.day
+            percent = int((dias_passados / ultimo_dia) * 100)
+            progress['value'] = percent
+
+            # resumo dos dados afetados
+            summary_frame = tk.Frame(content, bg="white")
+            summary_frame.pack(fill="both", expand=True)
+            ttk.Label(summary_frame, text="Resumo dos registros afetados:",
+                    style=f"{prefix}.BodyWhite.TLabel").pack(anchor="w", pady=(0, 4))
+
+            if isinstance(resumo, dict):
+                for k, v in resumo.items():
+                    ttk.Label(summary_frame, text=f"• {k}: {v} registro(s)",
+                            style=f"{prefix}.BodyWhite.TLabel").pack(anchor="w")
             else:
-                # se o usuário clicou manualmente, mostramos mesmo que não crítico
-                messagebox.showinfo("Aviso: Purga Mensal", texto)
-                self._last_purge_days = dias_restantes
+                ttk.Label(summary_frame, text=str(resumo),
+                        style=f"{prefix}.BodyWhite.TLabel").pack(anchor="w")
+
+            # linha de botões (fundo branco também)
+            btn_frame = tk.Frame(modal, bg="white")
+            btn_frame.pack(side="bottom", fill="x", padx=12, pady=12)
+
+            def _export_action():
+                # chama o método de exportação que agora existe na classe
+                try:
+                    # mantemos modal aberto enquanto a exportação ocorre
+                    self.exportar_historico(parent=modal)
+                except Exception as e:
+                    messagebox.showerror("Erro na exportação", f"Ocorreu um erro ao exportar:\n{e}")
+
+            # Botões com cores personalizadas (export verde, fechar cinza)
+            b_export = tk.Button(
+                btn_frame,
+                text="Exportar (Excel)",
+                command=_export_action,
+                bg="#27ae60", fg="white",
+                activebackground="#2ecc71",
+                bd=0, relief="raised",
+                padx=12, pady=6,
+            )
+            b_export.pack(side="right", padx=6)
+
+            b_close = tk.Button(
+                btn_frame,
+                text="Fechar",
+                command=modal.destroy,
+                bg="#95a5a6", fg="white",
+                activebackground="#b2babb",
+                bd=0, relief="raised",
+                padx=12, pady=6,
+            )
+            b_close.pack(side="left", padx=6)
+
+            modal.focus_set()
+            modal.wait_window()
+            self._last_purge_days = dias_restantes
 
         except Exception as e:
             print("Erro em mostrar_aviso_purga:", e)
+
+    def exportar_historico(self, parent=None):
+        """
+        Exporta os registros da tabela 'calculo_historico' para Excel (xlsx).
+        - Remove coluna 'id' (case-insensitive) antes de exportar.
+        - Normaliza datetimes (incl. tz-aware) para strings compatíveis com Excel.
+        """
+        try:
+            if not getattr(self, "conn", None):
+                messagebox.showerror("Exportar", "Conexão com o banco indisponível.")
+                return
+
+            cur = self.conn.cursor()
+            try:
+                cur.execute("SELECT * FROM calculo_historico;")
+                rows = cur.fetchall()
+                cols = [desc[0] for desc in cur.description] if cur.description else []
+            except Exception as e_query:
+                cur.close()
+                messagebox.showerror("Exportar", f"Erro ao consultar dados: {e_query}")
+                return
+            cur.close()
+
+            if not rows:
+                messagebox.showinfo("Exportar", "Não há registros para exportar.")
+                return
+
+            # monta DataFrame
+            try:
+                df = pd.DataFrame(rows, columns=cols)
+            except Exception:
+                df = pd.DataFrame(rows)
+
+            # --- Remover coluna(s) ID (case-insensitive) ---
+            id_cols = [c for c in df.columns if str(c).lower() == "id"]
+            if id_cols:
+                df.drop(columns=id_cols, inplace=True)
+
+            # --- Função de conversão segura para células datetime ---
+            def _cell_to_excel_safe(x):
+                if isinstance(x, datetime):
+                    # converte tz-aware para UTC e torna tz-naive
+                    if x.tzinfo is not None:
+                        x = x.astimezone(timezone.utc).replace(tzinfo=None)
+                    return x.strftime("%Y-%m-%d %H:%M:%S")
+                return x
+
+            # Aplica conversão por coluna:
+            for c in df.columns:
+                try:
+                    # se a coluna for datetime (tz-aware ou não), faz conversão vetorizada
+                    if ptypes.is_datetime64_any_dtype(df[c]) or ptypes.is_datetime64tz_dtype(df[c]):
+                        try:
+                            # se tz-aware, converte para UTC e remove timezone; então formata
+                            if ptypes.is_datetime64tz_dtype(df[c]):
+                                df[c] = df[c].dt.tz_convert("UTC").dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M:%S")
+                            else:
+                                df[c] = df[c].dt.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            # fallback para map célula-a-célula
+                            df[c] = df[c].map(_cell_to_excel_safe)
+                    else:
+                        # para outras colunas, aplica map que deixa intacto se não for datetime
+                        df[c] = df[c].map(_cell_to_excel_safe)
+                except Exception:
+                    # caso algo dê errado, transforma a coluna em string segura
+                    df[c] = df[c].astype(str)
+
+            # pede local para salvar
+            filetypes = [("Excel (*.xlsx)", "*.xlsx"), ("CSV (*.csv)", "*.csv"), ("Todos os arquivos", "*.*")]
+            initialfile = f"historico_calculo_{date.today().strftime('%Y%m%d')}.xlsx"
+            path = filedialog.asksaveasfilename(parent=parent, title="Salvar histórico", defaultextension=".xlsx",
+                                                filetypes=filetypes, initialfile=initialfile)
+            if not path:
+                return  # usuário cancelou
+
+            # se usuário escolheu csv, salva direto
+            if path.lower().endswith(".csv"):
+                try:
+                    df.to_csv(path, index=False, encoding="utf-8-sig")
+                    messagebox.showinfo("Exportar", f"Exportação concluída com sucesso (CSV):\n{path}")
+                except Exception as e_csv_direct:
+                    messagebox.showerror("Exportar", f"Falha ao salvar CSV:\n{e_csv_direct}")
+                return
+
+            # tenta salvar em Excel; se falhar, salva CSV como fallback
+            try:
+                df.to_excel(path, index=False)
+                messagebox.showinfo("Exportar", f"Exportação concluída com sucesso:\n{path}")
+            except Exception as e_xlsx:
+                try:
+                    csv_path = path if path.lower().endswith(".csv") else (path + ".csv")
+                    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+                    messagebox.showwarning("Exportar",
+                                        f"Falha ao gerar .xlsx ({e_xlsx}). Salvado como CSV:\n{csv_path}")
+                except Exception as e_csv:
+                    messagebox.showerror("Exportar", f"Falha ao salvar arquivo:\nErro .xlsx: {e_xlsx}\nErro .csv: {e_csv}")
+
+        except Exception as e_outer:
+            messagebox.showerror("Exportar", f"Erro inesperado ao exportar:\n{e_outer}")
+
+    def _get_purge_summary_safe(self):
+        """
+        Tenta consultar o banco e retornar um dicionário com contagens (ex: {'Cálculos': 123}).
+        Se a tabela não existir ou ocorrer erro, retorna uma mensagem amigável.
+        """
+        try:
+            cur = self.conn.cursor()
+            # Exemplo: contar registros na sua tabela (ajuste o nome da tabela/coluna conforme seu schema)
+            # Se sua tabela tiver outro nome, altere "calculo_historico" abaixo.
+            cur.execute("SELECT COUNT(*) FROM calculo_historico;")
+            total = cur.fetchone()[0]
+            # você pode adicionar mais queries aqui (p.ex. por usuário, por NF, etc.)
+            return {"Registros no Histórico": total}
+        except Exception:
+            # fallback: não quebra a UI, apenas retorna texto explicativo
+            return "Não foi possível obter detalhes do banco (tabela ausente ou erro)."
 
     def destroy(self):
         """Cancela callbacks e sinaliza threads antes de destruir a janela."""
