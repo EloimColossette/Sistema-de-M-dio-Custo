@@ -264,7 +264,7 @@ class CalculoProduto:
             ON 
                 sp.id = eq.id_produto
             ORDER BY
-                sp.data DESC, sp.nf ASC;
+                sp.data DESC, sp.nf::INTEGER DESC;
         """)
         resultados_atualizados = cursor.fetchall()
 

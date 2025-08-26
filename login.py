@@ -10,6 +10,7 @@ from conexao_db import conectar
 import json
 import os
 import threading, importlib
+from versao import __version__
 
 class TelaLogin:
     def __init__(self):
@@ -120,6 +121,15 @@ class TelaLogin:
             command=lambda: TelaResetarSenha(self.janela_login)
         )
         self.botao_esqueci_senha.pack(pady=(10, 15))
+
+        # --- Rodapé com versão ---
+        self.label_versao = ctk.CTkLabel(
+            self.janela_login,
+            text=f"Versão {__version__}",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.label_versao.pack(side="bottom", pady=5)
         
         self.janela_login.bind("<Return>", lambda event: self.verificar_login())
 

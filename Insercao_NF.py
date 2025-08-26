@@ -735,7 +735,7 @@ class Janela_InsercaoNF(tk.Toplevel):
             query = f"""
                 SELECT {', '.join(colunas_visiveis)} 
                 FROM somar_produtos 
-                ORDER BY data DESC, nf ASC;
+                ORDER BY data DESC, nf::INTEGER DESC;
             """
             self.cursor.execute(query)
             rows = self.cursor.fetchall()
@@ -832,13 +832,13 @@ class Janela_InsercaoNF(tk.Toplevel):
         janela_inserir.update_idletasks()
         centralizar_janela3(janela_inserir)
 
-        # Definir fundo e estilos padronizados
+        # Definir fundo da janela
         janela_inserir.configure(bg="#ecf0f1")
 
-        # Fonte dos títulos das entradas (reduzida)
+        # Fonte dos títulos das entradas
         LABEL_FONT = ("Arial", 9, "bold")
 
-        # Criar uma variável para o campo de data
+        # Variável para o campo de data
         data_var = tk.StringVar()
 
         # Função para formatar a data
@@ -851,9 +851,9 @@ class Janela_InsercaoNF(tk.Toplevel):
                 data = data[:2] + '/' + data[2:4] + '/' + data[4:8]
             data_var.set(data)
 
-        # Estilos exclusivos para essa janela
+        # Estilos exclusivos e locais para esta janela
         style = ttk.Style(janela_inserir)
-        style.theme_use("alt")
+        # NÃO mudar o tema global, apenas configure estilos locais
         style.configure("Inserir.TCombobox", padding=5, relief="flat",
                         background="#ecf0f1", font=("Arial", 10))
         style.configure("Inserir.TEntry", padding=5, relief="solid",
@@ -1107,9 +1107,9 @@ class Janela_InsercaoNF(tk.Toplevel):
         # Fonte dos títulos
         LABEL_FONT = ("Arial", 9, "bold")
 
-        # Estilos
+        # Estilos exclusivos e locais
         style = ttk.Style(janela_editar)
-        style.theme_use("alt")
+        # NÃO alterar o tema global
         style.configure("Editar.TCombobox", padding=5, relief="flat",
                         background="#ecf0f1", font=("Arial", 10))
         style.configure("Editar.TEntry", padding=5, relief="solid",
@@ -1215,6 +1215,7 @@ class Janela_InsercaoNF(tk.Toplevel):
 
         for coluna in range(num_colunas * 2):
             frame_campos.grid_columnconfigure(coluna, weight=1)
+
 
     def confirmar_editar(self, item_id, nf_original, janela_edit):
         """Confirma a edição de uma linha."""

@@ -22,6 +22,7 @@ import queue
 import traceback
 from datetime import datetime, date, timezone
 import calendar
+from versao import __version__
 
 class Janela_Menu(tk.Tk):
     def __init__(self, user_id):
@@ -824,6 +825,19 @@ class Janela_Menu(tk.Tk):
 
                 self.buttons.append((button, internal_name, shadow))
 
+        # 6) --- Rodapé com versão (colado no fim da tela) ---
+        footer = tk.Frame(self.sidebar_inner, bg="#1a252f")
+        footer.pack(side="bottom", fill="x", pady=10)
+
+        versao_label = tk.Label(
+            footer,
+            text=f"Versão {__version__}",
+            bg="#1a252f",
+            fg="lightgray",
+            font=("Helvetica", 9)
+        )
+        versao_label.pack(anchor="w", padx=10)  # <- alinhado à esquerda
+
     def _criar_abas(self):
         """Cria as abas do Notebook conforme self.permissoes e popula cada uma."""
         # limpa abas existentes
@@ -1497,7 +1511,7 @@ class Janela_Menu(tk.Tk):
                     SELECT data, nf, fornecedor, produto, peso_liquido 
                     FROM somar_produtos 
                     WHERE data = (SELECT MAX(data) FROM somar_produtos)
-                    ORDER BY data DESC;
+                    ORDER BY data DESC, nf::INTEGER DESC;
                 """)
                 entradas = cursor.fetchall()
                 cursor.close()
@@ -1550,7 +1564,7 @@ class Janela_Menu(tk.Tk):
                     WHERE CAST(data AS date) = (
                         SELECT CAST(MAX(data) AS date) FROM nf
                     )
-                    ORDER BY numero_nf ASC;
+                    ORDER BY numero_nf::INTEGER DESC;
                 """)
                 saidas = cursor.fetchall()
                 cursor.close()
