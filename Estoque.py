@@ -57,7 +57,6 @@ class CalculoProduto:
         # Chama a função que reorganiza os IDs ao inicializar a janela
         self.reiniciar_ids_estoque()
 
-    # ----- substituir a função configurar_estilo existente por esta -----
     def configurar_estilo(self):
         # usa o Style global (sem amarrar ao Toplevel) para garantir que theme_use afete tudo
         self.style = ttk.Style()
