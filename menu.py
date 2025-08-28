@@ -91,6 +91,9 @@ class Janela_Menu(tk.Tk):
         self._purge_flash_state = False
         self._last_purge_days = None
 
+        # id do after para o piscar (para poder cancelar na destruição)
+        self._purge_flash_job = None
+
         # cria abas mínimas (placeholder)
         self._criar_abas_minimal()
         self.update_idletasks()
@@ -380,30 +383,85 @@ class Janela_Menu(tk.Tk):
     def _flash_purge_badge(self):
         """
         Efeito de piscar da badge — alterna visibilidade/leves cores.
-        Só continua enquanto self._purge_flashing for True.
+        Guarda o id do after em self._purge_flash_job para permitir cancelamento seguro.
         """
         try:
+            # se a janela foi destruída, aborta
+            try:
+                if not self.winfo_exists():
+                    return
+            except Exception:
+                return
+
+            # se a flag estiver desligada, garante estado final e cancela job
             if not getattr(self, "_purge_flashing", False):
-                # garantir que a badge fique com cor crítica sólida ao terminar
                 try:
                     self.purge_badge.config(bg="#e74c3c", fg="white")
                 except Exception:
                     pass
+                # cancela qualquer after pendente
+                try:
+                    if getattr(self, "_purge_flash_job", None):
+                        self.after_cancel(self._purge_flash_job)
+                except Exception:
+                    pass
+                self._purge_flash_job = None
                 return
 
             # alterna entre dois estados visuais
-            if self._purge_flash_state:
-                # estado "acendido"
-                self.purge_badge.config(bg="#e74c3c", fg="white")
-            else:
-                # estado "apagadinho" (tom mais claro)
-                self.purge_badge.config(bg="#ff9999", fg="white")
+            try:
+                if self._purge_flash_state:
+                    self.purge_badge.config(bg="#e74c3c", fg="white")
+                else:
+                    self.purge_badge.config(bg="#ff9999", fg="white")
+            except Exception:
+                pass
 
             self._purge_flash_state = not self._purge_flash_state
-            # chama de novo em 700ms
-            self.after(700, self._flash_purge_badge)
+
+            # cancela qualquer after antigo (prudência)
+            try:
+                if getattr(self, "_purge_flash_job", None):
+                    self.after_cancel(self._purge_flash_job)
+            except Exception:
+                pass
+            self._purge_flash_job = None
+
+            # agenda próximo ciclo e guarda id
+            try:
+                self._purge_flash_job = self.after(700, self._flash_purge_badge)
+            except Exception:
+                # não foi possível agendar (janela provavelmente fechada)
+                self._purge_flash_job = None
+                self._purge_flashing = False
+
         except Exception as e:
             print("Erro no flash da badge:", e)
+            try:
+                if getattr(self, "_purge_flash_job", None):
+                    self.after_cancel(self._purge_flash_job)
+            except Exception:
+                pass
+            self._purge_flash_job = None
+            self._purge_flashing = False
+
+    def _cancel_all_afters(self):
+        """
+        Cancela todos os timers agendados no Tk (útil quando ids foram perdidos).
+        Coloque este método na classe (próximo a _cancel_after_job).
+        """
+        try:
+            info = self.tk.call('after', 'info')  # retorna '' ou ids separados por espaço
+            if not info:
+                return
+            jobs = str(info).split()
+            for j in jobs:
+                try:
+                    self.after_cancel(j)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def mostrar_aviso_purga(self, force: bool = False):
         """
@@ -679,6 +737,22 @@ class Janela_Menu(tk.Tk):
             # fallback: não quebra a UI, apenas retorna texto explicativo
             return "Não foi possível obter detalhes do banco (tabela ausente ou erro)."
 
+    def _cancel_after_job(self, attr_name: str):
+        """Cancela com segurança um job armazenado em self.<attr_name> e zera o atributo."""
+        try:
+            job = getattr(self, attr_name, None)
+            if job:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+                try:
+                    setattr(self, attr_name, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def destroy(self):
         """Cancela callbacks e sinaliza threads antes de destruir a janela."""
         try:
@@ -715,6 +789,27 @@ class Janela_Menu(tk.Tk):
                 except Exception:
                     pass
                 self._spinner_job = None
+        except Exception:
+            pass
+
+        # cancela job do flash da badge (se houver)
+        try:
+            try:
+                self._purge_flashing = False
+            except Exception:
+                pass
+            if getattr(self, "_purge_flash_job", None):
+                try:
+                    self.after_cancel(self._purge_flash_job)
+                except Exception:
+                    pass
+                self._purge_flash_job = None
+        except Exception:
+            pass
+
+        # cancela qualquer after pendente conhecido ou perdido (segurança extra)
+        try:
+            self._cancel_all_afters()
         except Exception:
             pass
 
@@ -2317,8 +2412,30 @@ class Janela_Menu(tk.Tk):
         except Exception:
             pass
 
+        # garante que o piscar pare e cancela job do flash
+        try:
+            try:
+                self._purge_flashing = False
+            except Exception:
+                pass
+            if getattr(self, '_purge_flash_job', None):
+                try:
+                    self.after_cancel(self._purge_flash_job)
+                except Exception:
+                    pass
+                self._purge_flash_job = None
+        except Exception:
+            pass
+
+        # cleanup geral
         try:
             self._cleanup()
+        except Exception:
+            pass
+
+        # cancela quaisquer afters restantes (segurança extra)
+        try:
+            self._cancel_all_afters()
         except Exception:
             pass
 
@@ -2369,7 +2486,7 @@ class Janela_Menu(tk.Tk):
 
         # cancelar after jobs conhecidos
         try:
-            for job_attr in ("hora_job", "_spinner_job"):
+            for job_attr in ("hora_job", "_spinner_job", "_purge_flash_job"):
                 job = getattr(self, job_attr, None)
                 if job:
                     try:
@@ -2380,6 +2497,12 @@ class Janela_Menu(tk.Tk):
                         setattr(self, job_attr, None)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+        # cancela quaisquer afters restantes (segurança extra)
+        try:
+            self._cancel_all_afters()
         except Exception:
             pass
 
@@ -2431,8 +2554,29 @@ class Janela_Menu(tk.Tk):
                 pass
             return
 
+        # garante que o piscar pare e cancela job do flash antes do cleanup
+        try:
+            try:
+                self._purge_flashing = False
+            except Exception:
+                pass
+            if getattr(self, "_purge_flash_job", None):
+                try:
+                    self.after_cancel(self._purge_flash_job)
+                except Exception:
+                    pass
+                self._purge_flash_job = None
+        except Exception:
+            pass
+
         try:
             self._cleanup()
+        except Exception:
+            pass
+
+        # cancela quaisquer afters restantes (segurança extra)
+        try:
+            self._cancel_all_afters()
         except Exception:
             pass
 
