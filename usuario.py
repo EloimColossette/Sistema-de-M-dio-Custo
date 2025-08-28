@@ -135,7 +135,6 @@ class InterfaceUsuarios:
         self.usuario_ids = {}
         
         self.janela_usuarios.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.janela_usuarios.mainloop()
     
     def _configurar_estilo(self):
         """Configura os estilos para frames, Treeview e botões."""
