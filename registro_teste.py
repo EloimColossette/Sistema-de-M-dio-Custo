@@ -115,6 +115,13 @@ class RegistroTeste(tk.Toplevel):
                 # NÃO aplicar _on_decimal_key aqui
                 e.bind("<KeyRelease>", self._on_area_key, add="+")
                 e.bind("<Double-Button-1>", self._reset_area_auto, add="+")
+                # -> cor de fundo para destacar que é campo com cálculo automático
+                try:
+                    e.config(bg="#fff7cc")  # amarelo suave
+                except Exception:
+                    pass
+                # chama o método da classe
+                self.add_tooltip(e, "Área: calculada automaticamente — não precisa digitar.", delay=400)
             elif lbl == "L.R. Tração (N)":
                 self.lr_n_entry = e
                 # apenas cálculo automático do MPa
@@ -125,6 +132,12 @@ class RegistroTeste(tk.Toplevel):
                 # sem formatação automática, só controle manual/auto
                 e.bind("<KeyRelease>", self._on_mpa_key, add="+")
                 e.bind("<Double-Button-1>", self._reset_mpa_auto, add="+")
+                # cor de fundo para destacar
+                try:
+                    e.config(bg="#fff7cc")
+                except Exception:
+                    pass
+                self.add_tooltip(e, "L.R. Tração (MPa): calculado automaticamente (N ÷ Área). Só digite se precisar.", delay=400)
             elif lbl == "Tempera":
                 self.temper_entry = e
                 e.bind("<KeyRelease>", self._on_tempera_key)
@@ -425,30 +438,37 @@ class RegistroTeste(tk.Toplevel):
         entry.icursor(min(pos, len(novo)))
 
     def _on_tempera_key(self, event):
-        """
-        Regras para o campo 'Tempera':
-        - Se usuário digitar 'Recozido', 'Mola' ou 'Duro' (case-insensitive) → mantém como está.
-        - Para qualquer outro texto → adiciona ' Duro' no final.
-        """
         e = self.temper_entry
         text = e.get().strip()
 
         if not text:
             novo = ""
         else:
-            low = text.lower()
+            low = text.lower().strip()
+            # casos exatos (sem adicionar "Duro" extra)
             if low in ("recozido", "mola", "duro"):
-                # mantém exatamente o que o usuário digitou
-                novo = text.capitalize() if low != "duro" else "Duro"
+                if low == "recozido":
+                    novo = "Recozido"
+                elif low == "mola":
+                    novo = "Mola"
+                else:
+                    novo = "Duro"
             else:
-                # remove qualquer sufixo 'duro' já digitado para evitar repetição
-                core = re.sub(r'\s*[dD]uro$', '', text)
-                novo = f"{core} Duro"
+                # remove qualquer ocorrência isolada da palavra 'duro' (case-insensitive)
+                core = re.sub(r'\bduro\b', '', text, flags=re.IGNORECASE).strip()
+                core = re.sub(r'\s+', ' ', core)  # colapsa espaços
+                # se sobrar texto, coloca " <texto> Duro", caso contrário só "Duro"
+                novo = f"{core} Duro" if core else "Duro"
 
-        pos = e.index(tk.INSERT)
+        # atualiza o Entry preservando a posição do cursor o máximo possível
+        try:
+            pos = e.index(tk.INSERT)
+        except Exception:
+            pos = None
         e.delete(0, tk.END)
         e.insert(0, novo)
-        e.icursor(min(pos, len(novo)))
+        if pos is not None:
+            e.icursor(min(pos, len(novo)))
 
     def _on_dim_key(self, event=None):
         """
@@ -567,6 +587,71 @@ class RegistroTeste(tk.Toplevel):
             s = s.replace(",", ".")
         # se só tem ponto, assume-se que é decimal e deixamos
         return s
+
+    def add_tooltip(self, widget, text, delay=400):
+        """Método de tooltip dentro da classe. Use: self.add_tooltip(widget, texto)."""
+        def _unschedule():
+            tt_id = getattr(widget, "_tt_id", None)
+            if tt_id:
+                try:
+                    widget.after_cancel(tt_id)
+                except Exception:
+                    pass
+                widget._tt_id = None
+
+        def _show():
+            if getattr(widget, "_tt_win", None) or not text:
+                return
+            try:
+                x = widget.winfo_rootx() + 20
+                y = widget.winfo_rooty() + widget.winfo_height() + 10
+            except Exception:
+                x, y = 100, 100
+            tw = tk.Toplevel(widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tw, text=text, justify="left",
+                           background="#ffffe0", relief="solid", borderwidth=1,
+                           font=("Arial", 8))
+            lbl.pack(ipadx=4, ipady=2)
+            widget._tt_win = tw
+
+        def _schedule(event=None):
+            _unschedule()
+            try:
+                widget._tt_id = widget.after(delay, _show)
+            except Exception:
+                widget._tt_id = None
+
+        def _hide(event=None):
+            _unschedule()
+            tw = getattr(widget, "_tt_win", None)
+            widget._tt_win = None
+            if tw:
+                try:
+                    tw.destroy()
+                except Exception:
+                    pass
+
+        widget.bind("<Enter>", _schedule)
+        widget.bind("<Leave>", _hide)
+        widget.bind("<ButtonPress>", _hide)
+
+        def remove():
+            try:
+                widget.unbind("<Enter>")
+                widget.unbind("<Leave>")
+                widget.unbind("<ButtonPress>")
+            except Exception:
+                pass
+            _hide()
+            for attr in ("_tt_id", "_tt_win"):
+                if hasattr(widget, attr):
+                    try:
+                        delattr(widget, attr)
+                    except Exception:
+                        pass
+        return remove
 
     def salvar(self):
         # helper para pegar valor de cada Entry
