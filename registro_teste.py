@@ -438,29 +438,46 @@ class RegistroTeste(tk.Toplevel):
         entry.icursor(min(pos, len(novo)))
 
     def _on_tempera_key(self, event):
+        # cancela qualquer formatação pendente
+        if hasattr(self, "_after_id"):
+            self.after_cancel(self._after_id)
+        # agenda a formatação para daqui a 600ms
+        self._after_id = self.after(600, self._format_tempera)
+
+    def _format_tempera(self):
         e = self.temper_entry
         text = e.get().strip()
 
         if not text:
             novo = ""
         else:
-            low = text.lower().strip()
-            # casos exatos (sem adicionar "Duro" extra)
-            if low in ("recozido", "mola", "duro"):
-                if low == "recozido":
-                    novo = "Recozido"
-                elif low == "mola":
-                    novo = "Mola"
-                else:
-                    novo = "Duro"
+            low = text.lower()
+
+            # dicionário de abreviações para nomes completos
+            abrevs = {
+                "rec": "Recozido",
+                "recoz": "Recozido",
+                "recozido": "Recozido",
+                "mol": "Mola",
+                "mola": "Mola",
+                "du": "Duro",
+                "duro": "Duro"
+            }
+
+            # verifica se a entrada corresponde a algum valor no dicionário
+            completo = abrevs.get(low)
+
+            if completo:
+                # se for um caso conhecido, mantém apenas o nome completo
+                novo = completo
             else:
-                # remove qualquer ocorrência isolada da palavra 'duro' (case-insensitive)
+                # remove qualquer "duro" isolado do texto e normaliza espaços
                 core = re.sub(r'\bduro\b', '', text, flags=re.IGNORECASE).strip()
-                core = re.sub(r'\s+', ' ', core)  # colapsa espaços
-                # se sobrar texto, coloca " <texto> Duro", caso contrário só "Duro"
+                core = re.sub(r'\s+', ' ', core)
+                # adiciona "Duro" ao final se houver texto, senão só "Duro"
                 novo = f"{core} Duro" if core else "Duro"
 
-        # atualiza o Entry preservando a posição do cursor o máximo possível
+        # atualiza o Entry preservando a posição do cursor
         try:
             pos = e.index(tk.INSERT)
         except Exception:
