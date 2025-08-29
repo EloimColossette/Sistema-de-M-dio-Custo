@@ -85,9 +85,7 @@ class RegistroTeste(tk.Toplevel):
         form.pack(fill="x", padx=10, pady=10)
 
         labels = [
-            "Data", "Código de Barras", "O.P.", "Cliente", "Material", "Liga", "Dimensões",
-            "Área", "L.R. Tração (N)", "L.R. Tração (MPa)", "Alongamento (%)", "Tempera",
-            "Máquina", "Empresa"
+            "Data", "Código de Barras", "O.P.", "Cliente", "Material", "Liga", "Dimensões","Área", "L.R. Tração (N)", "L.R. Tração (MPa)", "Alongamento (%)", "Tempera","Máquina", "Empresa"
         ]
 
         self.entries = {}
@@ -582,7 +580,7 @@ class RegistroTeste(tk.Toplevel):
     def _on_mpa_key(self, event=None):
         """Marca que o usuário digitou manualmente o MPa"""
         self.mpa_manual = True
-        
+
     def _reset_mpa_auto(self, event=None):
         """Duplo clique → volta para modo automático"""
         self.mpa_manual = False
