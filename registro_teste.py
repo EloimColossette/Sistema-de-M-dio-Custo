@@ -582,6 +582,7 @@ class RegistroTeste(tk.Toplevel):
     def _on_mpa_key(self, event=None):
         """Marca que o usuário digitou manualmente o MPa"""
         self.mpa_manual = True
+        
     def _reset_mpa_auto(self, event=None):
         """Duplo clique → volta para modo automático"""
         self.mpa_manual = False
