@@ -42,6 +42,14 @@ class RegistroTeste(tk.Toplevel):
             messagebox.showerror("Erro de Conexão", str(e))
             self.destroy()
             return
+        
+        # controle de atualização automática da área:
+        self.area_manual = False      # True quando usuário editou manualmente a área
+        self.last_auto_area = ""      # último valor auto-calculado (string com vírgula)
+
+        # controle de atualização automática do MPa:
+        self.mpa_manual = False
+        self.last_auto_mpa = ""
 
         # Montagem da UI
         self.create_widgets(fixed_font=fixed_font)
@@ -98,10 +106,25 @@ class RegistroTeste(tk.Toplevel):
                 e.bind("<KeyRelease>", self._on_along_key)
             elif lbl == "Dimensões":
                 self.dim_entry = e
+                # Só Dimensões precisa dessa formatação especial
                 e.bind("<KeyRelease>", lambda ev, en=e: self._on_decimal_key(ev, en))
+                e.bind("<KeyRelease>", self._on_dim_key, add="+")
+                e.bind("<FocusOut>", self._on_dim_key, add="+")
             elif lbl == "Área":
                 self.area_entry = e
-                e.bind("<KeyRelease>", lambda ev, en=e: self._on_decimal_key(ev, en))
+                # NÃO aplicar _on_decimal_key aqui
+                e.bind("<KeyRelease>", self._on_area_key, add="+")
+                e.bind("<Double-Button-1>", self._reset_area_auto, add="+")
+            elif lbl == "L.R. Tração (N)":
+                self.lr_n_entry = e
+                # apenas cálculo automático do MPa
+                e.bind("<KeyRelease>", self._on_lr_n_key)
+                e.bind("<FocusOut>", self._on_lr_n_key)
+            elif lbl == "L.R. Tração (MPa)":
+                self.lr_mpa_entry = e
+                # sem formatação automática, só controle manual/auto
+                e.bind("<KeyRelease>", self._on_mpa_key, add="+")
+                e.bind("<Double-Button-1>", self._reset_mpa_auto, add="+")
             elif lbl == "Tempera":
                 self.temper_entry = e
                 e.bind("<KeyRelease>", self._on_tempera_key)
@@ -310,7 +333,7 @@ class RegistroTeste(tk.Toplevel):
                 data,
                 row[2], row[3], row[4], row[5],
                 row[6], row[7],
-                f"{row[8]:.5f}".replace(".", ",") if row[8] is not None else "",
+                f"{row[8]:.4f}".replace(".", ",") if row[8] is not None else "",
                 lr_n, lr_mpa,
                 f"{row[11]:.0f}%" if row[11] is not None else "",
                 row[12], row[13], row[14]
@@ -386,13 +409,13 @@ class RegistroTeste(tk.Toplevel):
 
         if not digits:
             novo = ""
-        elif len(digits) <= 5:
+        elif len(digits) <= 3:
             # até cinco dígitos, mostra-os puros (sem vírgula)
             novo = digits
         else:
             # insere vírgula antes dos 5 últimos dígitos
-            inteiro = digits[:-5]
-            dec = digits[-5:]
+            inteiro = digits[:-3]
+            dec = digits[-3:]
             novo = f"{inteiro},{dec}"
 
         # posiciona o cursor próximo da posição original
@@ -403,20 +426,129 @@ class RegistroTeste(tk.Toplevel):
 
     def _on_tempera_key(self, event):
         """
-        Garante que o campo termine com ' Duro'.
-        Ex.: 'Extra' -> 'Extra Duro'
+        Regras para o campo 'Tempera':
+        - Se usuário digitar 'Recozido', 'Mola' ou 'Duro' (case-insensitive) → mantém como está.
+        - Para qualquer outro texto → adiciona ' Duro' no final.
         """
         e = self.temper_entry
         text = e.get().strip()
-        # remove sufixo já presente
-        core = re.sub(r'\s*[dD]uro$', '', text)
-        novo = f"{core} Duro" if core else ""
+
+        if not text:
+            novo = ""
+        else:
+            low = text.lower()
+            if low in ("recozido", "mola", "duro"):
+                # mantém exatamente o que o usuário digitou
+                novo = text.capitalize() if low != "duro" else "Duro"
+            else:
+                # remove qualquer sufixo 'duro' já digitado para evitar repetição
+                core = re.sub(r'\s*[dD]uro$', '', text)
+                novo = f"{core} Duro"
+
         pos = e.index(tk.INSERT)
         e.delete(0, tk.END)
         e.insert(0, novo)
-        # ajusta cursor antes de ' Duro'
-        new_pos = min(pos, len(core))
-        e.icursor(new_pos)
+        e.icursor(min(pos, len(novo)))
+
+    def _on_dim_key(self, event=None):
+        """
+        Recalcula a área a partir do valor das dimensões:
+        area = dimensoes * dimensoes * 0.7854
+        Insere no campo Área somente se o usuário não tiver
+        feito uma edição manual (self.area_manual == False)
+        ou caso o campo Área contenha exatamente o último valor auto.
+        """
+        if event and event.keysym == "Tab":
+            return
+        txt = (self.dim_entry.get().strip() if hasattr(self, "dim_entry") else "")
+        norm = self.normalize_number(txt)  # retorna string com ponto decimal ou None
+        if not norm:
+            return
+
+        try:
+            val = Decimal(norm)
+        except Exception:
+            return
+
+        try:
+            area_dec = (val * val * Decimal("0.7854")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        except Exception:
+            return
+
+        # formata com vírgula como separador decimal (4 casas)
+        area_str = format(area_dec, 'f').replace('.', ',')
+
+        current_area = (self.area_entry.get().strip() if hasattr(self, "area_entry") else "")
+        # atualiza se usuário não editou manualmente, ou se o campo ainda contém o último valor automático
+        if (not self.area_manual) or (current_area == self.last_auto_area) or (current_area == ""):
+            self.area_entry.delete(0, tk.END)
+            self.area_entry.insert(0, area_str)
+            self.last_auto_area = area_str
+            self.area_manual = False
+
+    def _on_area_key(self, event=None):
+        """
+        Chamado quando o usuário digita no campo 'Área' — marca que o valor
+        foi editado manualmente para evitar sobrescrita automática.
+        """
+        self.area_manual = True
+
+    def _reset_area_auto(self, event=None):
+        """
+        Ao dar duplo-clique no campo Área, remove a marca de edição manual
+        e recalcula imediatamente (se houver valor em Dimensões).
+        """
+        self.area_manual = False
+        # chama o recalculo (event pode ser None)
+        self._on_dim_key(event)
+
+    def _on_lr_n_key(self, event=None):
+        """
+        Recalcula o MPa sempre que o usuário digitar em L.R. Tração (N).
+        Fórmula: MPa = N / Área
+        """
+        if event and event.keysym == "Tab":
+            return
+        txt_n = (self.lr_n_entry.get().strip() if hasattr(self, "lr_n_entry") else "")
+        txt_area = (self.area_entry.get().strip() if hasattr(self, "area_entry") else "")
+
+        norm_n = self.normalize_number(txt_n)
+        norm_area = self.normalize_number(txt_area)
+
+        if not norm_n or not norm_area:
+            return
+
+        try:
+            val_n = Decimal(norm_n)
+            val_area = Decimal(norm_area)
+            if val_area == 0:
+                return
+        except Exception:
+            return
+
+        try:
+            mpa_dec = (val_n / val_area).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except Exception:
+            return
+
+        # formata com vírgula
+        mpa_str = format(mpa_dec, 'f').replace('.', ',')
+
+        current_mpa = (self.lr_mpa_entry.get().strip() if hasattr(self, "lr_mpa_entry") else "")
+
+        if (not self.mpa_manual) or (current_mpa == self.last_auto_mpa) or (current_mpa == ""):
+            self.lr_mpa_entry.delete(0, tk.END)
+            self.lr_mpa_entry.insert(0, mpa_str)
+            self.last_auto_mpa = mpa_str
+            self.mpa_manual = False
+
+    def _on_mpa_key(self, event=None):
+        """Marca que o usuário digitou manualmente o MPa"""
+        self.mpa_manual = True
+    def _reset_mpa_auto(self, event=None):
+        """Duplo clique → volta para modo automático"""
+        self.mpa_manual = False
+        self._on_lr_n_key(event)
 
     def normalize_number(self, s):
         """
