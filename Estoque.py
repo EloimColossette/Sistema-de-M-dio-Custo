@@ -1731,21 +1731,65 @@ class CalculoProduto:
         """
         Limpa registros anteriores ao mês atual na tabela calculo_historico.
         Operação silenciosa feita na inicialização (preserva registros do mês corrente).
+
+        Agora tenta renumerar os IDs dos registros remanescentes (começando em 1) **apenas**
+        se não existirem foreign keys referenciando a tabela calculo_historico.
         """
         try:
             conn = conectar()
             cur = conn.cursor()
+            # Apaga antigos
             cur.execute(
-                "DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now());"
+                "DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now()) RETURNING id;"
             )
-            deleted = cur.rowcount
+            deleted = len(cur.fetchall())
             conn.commit()
+
+            # tenta renumerar, se aplicável
+            try:
+                cur.execute("""
+                    SELECT COUNT(*) FROM pg_constraint
+                    WHERE confrelid = 'calculo_historico'::regclass AND contype = 'f';
+                """)
+                fk_count = cur.fetchone()[0] or 0
+
+                if fk_count == 0:
+                    cur.execute("SELECT COUNT(*) FROM calculo_historico;")
+                    remaining = cur.fetchone()[0] or 0
+                    if remaining > 0:
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS calculo_historico_tmp AS
+                            SELECT usuario, nf, produto, quantidade, tipo, timestamp
+                            FROM calculo_historico
+                            ORDER BY timestamp, id;
+                        """)
+                        cur.execute("TRUNCATE calculo_historico RESTART IDENTITY;")
+                        cur.execute("""
+                            INSERT INTO calculo_historico (usuario, nf, produto, quantidade, tipo, timestamp)
+                            SELECT usuario, nf, produto, quantidade, tipo, timestamp FROM calculo_historico_tmp ORDER BY timestamp, nf;
+                        """)
+                        cur.execute("DROP TABLE IF EXISTS calculo_historico_tmp;")
+                        conn.commit()
+                    else:
+                        try:
+                            cur.execute("SELECT setval(pg_get_serial_sequence('calculo_historico','id'), 1, false);")
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+                else:
+                    # Existem FKs; não renumerar
+                    print("Renumeração automática ignorada: chaves estrangeiras apontam para calculo_historico.")
+            except Exception as e_ren:
+                conn.rollback()
+                print("Erro ao tentar renumerar na purga automática:", e_ren)
+
             # notifica outras instâncias, se houver LISTEN
             try:
                 cur.execute("NOTIFY historico_atualizado, 'purge';")
                 conn.commit()
             except Exception:
                 pass
+
             cur.close()
             conn.close()
             if deleted:
@@ -2166,18 +2210,91 @@ class CalculoProduto:
         """
         Executa a purga. Por padrão (total=False) apaga apenas registros anteriores ao mês atual.
         Se total=True apaga tudo — usar com extremo cuidado e apenas por ação explícita.
+
+        Implementação atualizada:
+        - se total=True: usa TRUNCATE ... RESTART IDENTITY (garante que próximo id comece em 1)
+        - se parcial: deleta registros antigos e, SE NÃO existirem foreign keys referenciando
+        calculo_historico, recria os registros restantes em ordem (renumerando os ids para 1..N).
+        Se houver FKs, a renumeração é ignorada (para não quebrar referências).
         """
         try:
             conn = conectar()
             cur = conn.cursor()
+
             if total:
-                # Atenção: apaga toda a tabela
-                cur.execute("DELETE FROM calculo_historico;")
+                # conta antes para informar quantas linhas foram removidas
+                try:
+                    cur.execute("SELECT COUNT(*) FROM calculo_historico;")
+                    total_before = cur.fetchone()[0] or 0
+                except Exception:
+                    total_before = 0
+                # Usa TRUNCATE para apagar tudo e reiniciar sequência
+                try:
+                    cur.execute("TRUNCATE calculo_historico RESTART IDENTITY;")
+                    deleted = total_before
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    # Fallback: tentar DELETE + setval
+                    cur.execute("DELETE FROM calculo_historico;")
+                    deleted = cur.rowcount
+                    cur.execute("SELECT setval(pg_get_serial_sequence('calculo_historico','id'), 1, false);")
+                    conn.commit()
+
             else:
-                # Apaga apenas registros anteriores ao início do mês atual
-                cur.execute("DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now());")
-            deleted = cur.rowcount
-            conn.commit()
+                # delete parcial: registros anteriores ao mês atual
+                try:
+                    cur.execute("DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now()) RETURNING id;")
+                    removed_rows = cur.fetchall()
+                    deleted = len(removed_rows)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+
+                # após remoção parcial, tenta renumerar os IDs restantes
+                try:
+                    # verifica se há FK referenciando calculo_historico
+                    cur.execute("""
+                        SELECT COUNT(*) FROM pg_constraint
+                        WHERE confrelid = 'calculo_historico'::regclass AND contype = 'f';
+                    """)
+                    fk_count = cur.fetchone()[0] or 0
+
+                    if fk_count == 0:
+                        # apenas renumera se houver registros remanescentes
+                        cur.execute("SELECT COUNT(*) FROM calculo_historico;")
+                        remaining = cur.fetchone()[0] or 0
+                        if remaining > 0:
+                            # recria tabela temporária com os dados na ordem desejada e reinsera para renumerar IDs
+                            cur.execute("""
+                                CREATE TABLE calculo_historico_tmp AS
+                                SELECT usuario, nf, produto, quantidade, tipo, timestamp
+                                FROM calculo_historico
+                                ORDER BY timestamp, id;
+                            """)
+                            cur.execute("TRUNCATE calculo_historico RESTART IDENTITY;")
+                            cur.execute("""
+                                INSERT INTO calculo_historico (usuario, nf, produto, quantidade, tipo, timestamp)
+                                SELECT usuario, nf, produto, quantidade, tipo, timestamp FROM calculo_historico_tmp ORDER BY timestamp, nf;
+                            """)
+                            cur.execute("DROP TABLE IF EXISTS calculo_historico_tmp;")
+                            conn.commit()
+                        else:
+                            # sem registros remanescentes, força sequência a 1
+                            try:
+                                cur.execute("SELECT setval(pg_get_serial_sequence('calculo_historico','id'), 1, false);")
+                                conn.commit()
+                            except Exception:
+                                conn.rollback()
+                    else:
+                        # Há FKs — não renumerar; apenas logar para o usuário/admin
+                        print("Renumeração de IDs ignorada: existem chaves estrangeiras apontando para calculo_historico.")
+                except Exception as e_renum:
+                    # Se algo falhar na renumeração, desfaz e continua (não queremos perder dados já válidos)
+                    conn.rollback()
+                    print("Falha ao renumerar IDs após purga parcial:", e_renum)
+
             # Notifica outras instâncias que escutem (opcional)
             try:
                 cur.execute("NOTIFY historico_atualizado, 'purge';")
@@ -2185,8 +2302,10 @@ class CalculoProduto:
             except Exception:
                 # NOTIFY não é crítico — ignora falhas aqui
                 pass
+
             cur.close()
             conn.close()
+
             try:
                 messagebox.showinfo("Purge Mensal", f"Purga concluída. Linhas removidas: {deleted}")
             except Exception:
