@@ -227,10 +227,17 @@ class CalculoProduto:
         dados = self.carregar_dados()
         self.calcular_dados(dados)
         self.verificar_e_avisar_exportacao_inicio(dias_aviso=3)
-        # garantir que a rotina de purga esteja rodando
-        self.iniciar_rotina_purga_mensal()
         # garantir tabela de histórico criada
         self.garantir_tabela_historico()
+        # garantir que a rotina de purga esteja rodando
+        self.iniciar_rotina_purga_mensal()
+        # purga automática silenciosa na abertura caso tenha virado o mês
+        try:
+            # chama o método que limpa registros de meses anteriores
+            self.purga_automatica_na_abertura()
+        except Exception:
+            # não quer quebrar a inicialização se algo falhar aqui
+            traceback.print_exc()
 
     def atualizar_treeview(self):
         """Função para atualizar o Treeview após a inserção de novos dados."""
@@ -1720,6 +1727,33 @@ class CalculoProduto:
             print("Erro ao garantir tabela calculo_historico:", e)
             traceback.print_exc()
 
+    def purga_automatica_na_abertura(self):
+        """
+        Limpa registros anteriores ao mês atual na tabela calculo_historico.
+        Operação silenciosa feita na inicialização (preserva registros do mês corrente).
+        """
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now());"
+            )
+            deleted = cur.rowcount
+            conn.commit()
+            # notifica outras instâncias, se houver LISTEN
+            try:
+                cur.execute("NOTIFY historico_atualizado, 'purge';")
+                conn.commit()
+            except Exception:
+                pass
+            cur.close()
+            conn.close()
+            if deleted:
+                print(f"Purga automática: removidas {deleted} linhas de calculo_historico")
+        except Exception as e:
+            print("Erro em purga_automatica_na_abertura:", e)
+            traceback.print_exc()
+
     def registrar_acao_historico(self, nf, produto, quantidade, tipo, usuario=None):
         """
         Registra a ação no histórico (insere no BD e mantém cache local).
@@ -2030,11 +2064,11 @@ class CalculoProduto:
 
     def avisar_e_purgar(self):
         """
-        Abre diálogo avisando que o sistema irá apagar o histórico de cálculo (tabela).
-        Oferece: Exportar e Apagar / Apagar Agora / Adiar 24h
+        Diálogo informativo: avisa que o histórico será limpo automaticamente na virada do mês.
+        Oferece: Exportar (mantém dados) / Fechar. NÃO apaga nada aqui.
         """
         dialog = tk.Toplevel(self.root)
-        dialog.title("Purge Mensal - Histórico de Cálculo")
+        dialog.title("Aviso — Histórico de Cálculo")
         dialog.transient(self.root)
         dialog.grab_set()
         try:
@@ -2046,51 +2080,51 @@ class CalculoProduto:
         except Exception:
             pass
 
-        ttk.Label(dialog, text="Aviso: Neste momento o sistema irá apagar o histórico de cálculo (tabela).", wraplength=440).pack(padx=10, pady=(12,6))
-        ttk.Label(dialog, text="Se desejar, exporte para Excel antes de apagar. Escolha uma opção:", wraplength=440).pack(padx=10)
+        texto = (
+            "Aviso: Está próximo do fim do mês. Este diálogo apenas avisa que o histórico "
+            "de cálculo será limpo automaticamente quando o mês virar. Se desejar, "
+            "exporte para Excel agora para manter uma cópia dos dados."
+        )
+        ttk.Label(dialog, text=texto, wraplength=440, justify="left").pack(padx=10, pady=(12,8))
+
+        obs = (
+            "Observação: a limpeza automática ocorrerá na virada do mês quando qualquer "
+            "usuário abrir o sistema. Este diálogo NÃO executa a limpeza."
+        )
+        ttk.Label(dialog, text=obs, wraplength=440, justify="left").pack(padx=10)
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=12)
 
-        def on_export_and_delete():
+        def on_export_only():
             dialog.destroy()
             try:
                 caminho = self.exportar_historico_para_excel()
-            except Exception:
+            except Exception as e:
                 caminho = None
-
+                print("Erro ao exportar histórico:", e)
+                traceback.print_exc()
             if caminho:
-                # export foi bem-sucedida — prossegue com a purge
-                self.executar_purga()
-            else:
-                # export cancelada ou falhou — pergunta se usuário quer apagar sem exportar
-                resp = messagebox.askyesno(
-                    "Apagar sem exportar?",
-                    "A exportação não foi concluída. Deseja apagar o histórico mesmo assim?"
-                )
-                if resp:
-                    self.executar_purga()
-                else:
-                    messagebox.showinfo("Cancelado", "Operação de purge cancelada.")
-
-        def on_delete_now():
-            dialog.destroy()
-            self.executar_purga()
-
-        def on_defer_24h():
-            dialog.destroy()
-            messagebox.showinfo("Adiado", "Purge adiado 24 horas.")
-            def delayed_call():
-                time.sleep(24*3600)
                 try:
-                    self.root.after(0, lambda: self.avisar_e_purgar())
+                    messagebox.showinfo("Exportação", f"Histórico exportado para:\n{caminho}")
                 except Exception:
                     pass
-            threading.Thread(target=delayed_call, daemon=True).start()
+            else:
+                try:
+                    messagebox.showinfo("Exportação", "Exportação cancelada ou falhou. Registros permanecerão e serão limpos na virada do mês.")
+                except Exception:
+                    pass
 
-        ttk.Button(btn_frame, text="Exportar e Apagar", command=on_export_and_delete).pack(side="left", padx=6)
-        ttk.Button(btn_frame, text="Apagar Agora", command=on_delete_now).pack(side="left", padx=6)
-        ttk.Button(btn_frame, text="Adiar 24h", command=on_defer_24h).pack(side="left", padx=6)
+        def on_close():
+            dialog.destroy()
+
+        ttk.Button(btn_frame, text="Exportar (manter dados)", command=on_export_only).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Fechar", command=on_close).pack(side="left", padx=6)
+
+        try:
+            dialog.focus_force()
+        except Exception:
+            pass
 
     def segundos_ate_proxima_purga(self):
         agora = datetime.now()
@@ -2115,22 +2149,41 @@ class CalculoProduto:
         # garante espera mínima (evita sleep(0))
         return max(60, int(delta))
 
-    def executar_purga(self):
+    def executar_purga(self, total=False):
         """
-        Executa o DELETE na tabela calculo_historico e notifica instâncias via NOTIFY.
+        Executa a purga. Por padrão (total=False) apaga apenas registros anteriores ao mês atual.
+        Se total=True apaga tudo — usar com extremo cuidado e apenas por ação explícita.
         """
         try:
             conn = conectar()
             cur = conn.cursor()
-            cur.execute("DELETE FROM calculo_historico;")
+            if total:
+                # Atenção: apaga toda a tabela
+                cur.execute("DELETE FROM calculo_historico;")
+            else:
+                # Apaga apenas registros anteriores ao início do mês atual
+                cur.execute("DELETE FROM calculo_historico WHERE timestamp < date_trunc('month', now());")
+            deleted = cur.rowcount
             conn.commit()
-            cur.execute("NOTIFY historico_atualizado, 'purge';")
-            conn.commit()
+            # Notifica outras instâncias que escutem (opcional)
+            try:
+                cur.execute("NOTIFY historico_atualizado, 'purge';")
+                conn.commit()
+            except Exception:
+                # NOTIFY não é crítico — ignora falhas aqui
+                pass
             cur.close()
             conn.close()
-            messagebox.showinfo("Purge Mensal", "Histórico apagado com sucesso.")
+            try:
+                messagebox.showinfo("Purge Mensal", f"Purga concluída. Linhas removidas: {deleted}")
+            except Exception:
+                # Garantir que falha em mostrar diálogo não quebre a função
+                print(f"Purga concluída. Linhas removidas: {deleted}")
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao apagar histórico: {e}")
+            try:
+                messagebox.showerror("Erro", f"Erro ao apagar histórico: {e}")
+            except Exception:
+                print("Erro ao apagar histórico:", e)
             print("Erro no executar_purga:", e)
             traceback.print_exc()
 
