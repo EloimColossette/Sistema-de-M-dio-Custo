@@ -10,6 +10,8 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool, OperationalError, DatabaseError
+import random
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -313,14 +315,6 @@ class PoolPostgres:
                         time.sleep(tempo_espera)
             return wrapper
         return deco
-
-# --- END merged db_pool.py content ---
-
-import os
-import time
-import logging
-import random
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
