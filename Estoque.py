@@ -1925,11 +1925,13 @@ class CalculoProduto:
         """
         Exporta todo o histórico do banco para um arquivo .xlsx (pede local de salvamento).
         Retorna o caminho do arquivo salvo, ou None se o usuário cancelar / ocorrer erro.
+        Exporta apenas as colunas necessárias e com cabeçalhos:
+        Usuário, NF, Produto, Quantidade, Operação, Data/Hora
         """
         try:
             conn = conectar()
             cur = conn.cursor()
-            cur.execute("SELECT id, usuario, nf, produto, quantidade, tipo, timestamp FROM calculo_historico ORDER BY timestamp;")
+            cur.execute("SELECT usuario, nf, produto, quantidade, tipo, timestamp FROM calculo_historico ORDER BY timestamp;")
             rows = cur.fetchall()
             cur.close()
             conn.close()
@@ -1941,13 +1943,13 @@ class CalculoProduto:
             messagebox.showinfo("Exportar Histórico", "Não há registros para exportar.")
             return None
 
-        # Normaliza timestamps: converte tz-aware para string legível (dd/mm/YYYY HH:MM:SS)
+        # Process rows: format timestamp and map tipo to operação amigável
         processed = []
         for r in rows:
+            usuario, nf, produto, quantidade, tipo, ts = r
+            # format timestamp
             try:
-                ts = r[6]
                 if isinstance(ts, datetime):
-                    # se tz-aware, converte para UTC e remove tzinfo; se não, usa direto
                     if ts.tzinfo is not None:
                         ts_naive = ts.astimezone(timezone.utc).replace(tzinfo=None)
                     else:
@@ -1956,20 +1958,31 @@ class CalculoProduto:
                 else:
                     ts_str = str(ts) if ts is not None else ""
             except Exception:
-                ts_str = str(r[6]) if r[6] is not None else ""
-            # monta tupla com timestamp convertido para string
-            processed.append((r[0], r[1], r[2], r[3], r[4], r[5], ts_str))
+                ts_str = str(ts) if ts is not None else ""
 
-        df = pd.DataFrame(processed, columns=["id", "usuario", "nf", "produto", "quantidade", "tipo", "timestamp"])
+            operacao = "Adicionado" if tipo == "adicionar" else "Subtraído" if tipo == "subtrair" else (tipo or "")
+            # quantidade as string with comma decimal if numeric
+            try:
+                qtd_str = str(quantidade).replace(".", ",")
+            except Exception:
+                qtd_str = str(quantidade) if quantidade is not None else ""
+
+            processed.append((usuario or "", nf or "", produto or "", qtd_str, operacao, ts_str))
+
+        # Build DataFrame with desired headers and without id column
+        import pandas as pd
+        df = pd.DataFrame(processed, columns=["Usuário", "NF", "Produto", "Quantidade", "Operação", "Data/Hora"])
+
+        # default filename
+        default_name = f"historico_calculo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
         caminho = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
+            initialfile=default_name,
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
             title="Salvar histórico como..."
         )
         if not caminho:
-            # usuário cancelou
-            messagebox.showinfo("Exportar Histórico", "Exportação cancelada.")
             return None
 
         try:
