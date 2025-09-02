@@ -3,6 +3,7 @@ import time
 import threading
 import logging
 import weakref
+import concurrent.futures
 from psycopg2 import connect
 from psycopg2 import pool as pg_pool
 
@@ -29,6 +30,14 @@ _SEM_TIMEOUT = int(os.environ.get("DB_SEM_TIMEOUT", "30"))  # segundos
 # watchdog: tempo máximo que uma conexão pode ficar "emprestada" antes de ser forçosamente devolvida
 _MAX_CHECKOUT_SECONDS = int(os.environ.get("DB_MAX_CHECKOUT_SECONDS", "120"))
 
+# extras
+_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", str(5 * 60 * 1000)))  # 5 minutos padrão
+_APPLICATION_NAME = os.environ.get("DB_APPLICATION_NAME", "app_kametal")
+
+# Executor/background workers (configurável)
+_DB_WORKER_THREADS = int(os.environ.get("DB_WORKER_THREADS", "8"))
+_executor = None
+
 # ---------------------------
 # Estado do módulo
 # ---------------------------
@@ -49,10 +58,6 @@ _total_checkouts = 0
 _total_returns = 0
 _total_forced_gc_returns = 0
 _metrics_lock = threading.Lock()
-
-# extras
-_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", str(5 * 60 * 1000)))  # 5 minutos padrão
-_APPLICATION_NAME = os.environ.get("DB_APPLICATION_NAME", "app_kametal")
 
 # ---------------------------
 # Internal helpers
@@ -121,6 +126,7 @@ def _init_pool_if_needed(minconn=_POOL_MIN, maxconn=_POOL_MAX, **connect_kwargs)
             _heartbeat_thread = threading.Thread(target=_heartbeat_loop, name="db-heartbeat", daemon=True)
             _heartbeat_thread.start()
 
+
 def _safe_ping_conn(conn, timeout=5):
     """Executa SELECT 1 em conn; protege contra erros."""
     try:
@@ -132,6 +138,7 @@ def _safe_ping_conn(conn, timeout=5):
     except Exception:
         logger.debug("Ping falhou numa conexão (ignorado).", exc_info=False)
         return False
+
 
 def _heartbeat_loop():
     """Loop que periodicamente pinga heartbeat dedicado e conexões ativas.
@@ -194,13 +201,14 @@ def _heartbeat_loop():
 
     logger.info("Heartbeat do pool finalizado.")
 
+
 # ---------------------------
 # ConnectionProxy (com watchdog)
 # ---------------------------
 class ConnectionProxy:
     """
     Proxy que encapsula a conexão real e garante liberação (close).
-    Possui watchdog que força devolução após _MAX_CHECKOUT_SECONDS.
+    Watchdog apenas loga (não força devolução) na versão pedida.
     """
     __slots__ = ("_conn", "_closed", "_checkout_ts", "_watchdog")
 
@@ -221,7 +229,7 @@ class ConnectionProxy:
             except Exception:
                 pass
 
-        # inicia watchdog (timer) que força retorno caso não seja fechado a tempo
+        # inicia watchdog (timer) que avisa se não for fechado a tempo (não força fechamento)
         try:
             if _MAX_CHECKOUT_SECONDS and _MAX_CHECKOUT_SECONDS > 0:
                 t = threading.Timer(_MAX_CHECKOUT_SECONDS, self._watchdog_cb)
@@ -232,16 +240,14 @@ class ConnectionProxy:
             self._watchdog = None
 
     def _watchdog_cb(self):
-        """Callback executado pelo timer: apenas avisa que o checkout excedeu o limite.
-        Não força devolução nem fecha a conexão automaticamente.
-        """
+        """Callback executado pelo timer: apenas avisa que o checkout excedeu o limite."""
         try:
             if not getattr(self, "_closed", True):
                 logger.warning(
                     "Watchdog: checkout excedeu %ds — conexão ainda aberta (não será forçada).",
                     _MAX_CHECKOUT_SECONDS
                 )
-                # Se quiser, poderia rearmar o timer para avisar de novo no futuro
+                # não chamamos _force_close() aqui conforme solicitado
         except Exception:
             pass
 
@@ -407,12 +413,132 @@ class ConnectionProxy:
             raise AttributeError(f"conexão fechada/devolvida: {item}")
         return getattr(conn, item)
 
+
+# ---------------------------
+# Executor (helpers para execução em background)
+# ---------------------------
+def _init_executor_if_needed(max_workers_hint=None):
+    """Cria ThreadPoolExecutor se ainda não existir. Chamado dentro de conectar()."""
+    global _executor
+    if _executor is not None:
+        return
+    maxw = _DB_WORKER_THREADS
+    if max_workers_hint:
+        try:
+            maxw = min(maxw, int(max_workers_hint))
+        except Exception:
+            pass
+    try:
+        _executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, maxw))
+        logger.info("DB executor iniciado (workers=%d)", maxw)
+    except Exception:
+        _executor = None
+        logger.exception("Falha ao iniciar DB executor")
+
+
+def _db_worker_execute(sql, params=None, commit=False, fetch=False, statement_timeout_ms=None):
+    """
+    Executa query no worker: obtém conexão com `conectar()`, executa, (commit opcional) e fecha.
+    Retorna rows se fetch=True, caso contrário None.
+    """
+    conn = None
+    try:
+        conn = conectar()  # usar conectar() garante que o pool/executor estejam prontos
+        if conn is None:
+            raise RuntimeError("Não foi possível obter conexão para execução de query")
+        with conn:
+            cur = conn.cursor()
+            try:
+                if statement_timeout_ms is not None:
+                    cur.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
+                cur.execute(sql, params or ())
+                if commit:
+                    try:
+                        conn.commit()
+                    except Exception:
+                        logger.exception("Erro ao commitar")
+                        raise
+                if fetch:
+                    return cur.fetchall()
+                return None
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+    finally:
+        # nada a fazer aqui — ConnectionProxy.close() cuida da devolução
+        pass
+
+
+def execute_async(sql, params=None, commit=False, fetch=False,
+                  statement_timeout_ms=None, callback=None, error_callback=None):
+    """
+    Envia a query para execução em background e retorna Future.
+    - callback(result) será chamado (no thread do executor) quando a execução terminar com sucesso.
+    - error_callback(exc) será chamado (no thread do executor) se der erro.
+    """
+    global _executor
+    if _executor is None:
+        # tenta inicializar com base no pool max (se disponível)
+        try:
+            maxhint = getattr(_pool, "maxconn", None) or getattr(_pool, "maxsize", None)
+        except Exception:
+            maxhint = None
+        _init_executor_if_needed(maxhint)
+
+    if _executor is None:
+        raise RuntimeError("Executor não disponível para execução assíncrona")
+
+    fut = _executor.submit(_db_worker_execute, sql, params, commit, fetch, statement_timeout_ms)
+
+    if callback or error_callback:
+        def _done_cb(f):
+            try:
+                res = f.result()
+                if callback:
+                    try:
+                        callback(res)
+                    except Exception:
+                        logger.exception("Erro no callback de sucesso")
+            except Exception as e:
+                if error_callback:
+                    try:
+                        error_callback(e)
+                    except Exception:
+                        logger.exception("Erro no callback de erro")
+                else:
+                    logger.exception("Erro na execução assíncrona")
+        fut.add_done_callback(_done_cb)
+
+    return fut
+
+
+def execute_sync_with_timeout(sql, params=None, commit=False, fetch=False,
+                              statement_timeout_ms=None, timeout=None):
+    """
+    Executa a query em background, mas aguarda o resultado até `timeout` segundos.
+    Retorna o resultado (se fetch=True) ou None. Lança TimeoutError se exceder tempo.
+    Use isso com cautela na UI principal (melhor ainda usar execute_async + callback).
+    """
+    fut = execute_async(sql=sql, params=params, commit=commit, fetch=fetch,
+                        statement_timeout_ms=statement_timeout_ms)
+    try:
+        return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        try:
+            fut.cancel()
+        except Exception:
+            pass
+        raise
+
+
 # ---------------------------
 # Encerramento / utilitários
 # ---------------------------
 def fechar_todas_conexoes():
     """Fecha todas conexões do pool e para o heartbeat. Chame ao encerrar a aplicação."""
-    global _pool, _heartbeat_stop, _heartbeat_thread, _heartbeat_conn, _checkout_semaphore
+    global _pool, _heartbeat_stop, _heartbeat_thread, _heartbeat_conn, _checkout_semaphore, _executor
 
     # para heartbeat
     try:
@@ -452,6 +578,16 @@ def fechar_todas_conexoes():
     except Exception:
         pass
 
+    # encerra executor
+    try:
+        if _executor is not None:
+            try:
+                _executor.shutdown(wait=False)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # aguarda thread terminar (se existir)
     try:
         if _heartbeat_thread is not None and _heartbeat_thread.is_alive():
@@ -464,6 +600,7 @@ def fechar_todas_conexoes():
         _checkout_semaphore = None
     except Exception:
         pass
+
 
 def imprimir_metricas_pool():
     """Imprime métricas básicas do pool e proxies ativas."""
@@ -483,6 +620,7 @@ def imprimir_metricas_pool():
         print(f"METRICAS_POOL: total_checkouts={tc} total_returns={tr} forced_gc_returns={tf} active_proxies={ap} pool_max={pool_max}")
     except Exception:
         logger.exception("Falha ao imprimir métricas do pool")
+
 
 def obter_metricas_uso():
     """Retorna dicionário com métricas úteis (para logs/monitor)."""
@@ -504,6 +642,7 @@ def obter_metricas_uso():
         "pool_max": getattr(_pool, "maxconn", None) if _pool else None,
     }
 
+
 # ---------------------------
 # Função pública: conectar(...)
 # ---------------------------
@@ -511,8 +650,12 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
     """
     Mantém compatibilidade com sua função original:
       conn = conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None)
+
+    Observação importante:
+    - O executor de background é inicializado AQUI (dentro de conectar) logo após o pool ser criado,
+      garantindo que a execução em background só exista quando o pool estiver pronto.
     """
-    global _pool, _conn_params, _pool_lock, _checkout_semaphore
+    global _pool, _conn_params, _pool_lock, _checkout_semaphore, _executor
 
     # importa TelaLogin dentro da função para compatibilidade com seu projeto
     try:
@@ -547,6 +690,13 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
     except Exception:
         logger.exception("Não foi possível inicializar pool de conexões")
         return None
+
+    # *** Inicializa executor AQUI (dentro de conectar), como requisitado ***
+    try:
+        # hint para tamanho do executor: usamos maxc (tamanho do pool) como limite superior
+        _init_executor_if_needed(max_workers_hint=maxc)
+    except Exception:
+        logger.exception("Falha ao inicializar executor (não crítico)")
 
     # usa o semaphore criado no init do pool
     _semaphore = _checkout_semaphore
