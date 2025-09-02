@@ -235,15 +235,16 @@ class ConnectionProxy:
             self._watchdog = None
 
     def _watchdog_cb(self):
-        """Callback executado pelo timer: força fechamento se proxy ainda aberto."""
+        """Callback executado pelo timer: apenas avisa que o checkout excedeu o limite.
+        Não força devolução nem fecha a conexão automaticamente.
+        """
         try:
             if not getattr(self, "_closed", True):
-                logger.warning("Watchdog: checkout excedeu %ds — forçando devolução.", _MAX_CHECKOUT_SECONDS)
-                try:
-                    # força rollback e devolução ao pool
-                    self._force_close()
-                except Exception:
-                    logger.exception("Erro ao forçar devolução pela watchdog")
+                logger.warning(
+                    "Watchdog: checkout excedeu %ds — conexão ainda aberta (não será forçada).",
+                    _MAX_CHECKOUT_SECONDS
+                )
+                # Se quiser, poderia rearmar o timer para avisar de novo no futuro
         except Exception:
             pass
 
