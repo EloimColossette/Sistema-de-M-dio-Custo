@@ -121,7 +121,6 @@ def _init_pool_if_needed(minconn=_POOL_MIN, maxconn=_POOL_MAX, **connect_kwargs)
             _heartbeat_thread = threading.Thread(target=_heartbeat_loop, name="db-heartbeat", daemon=True)
             _heartbeat_thread.start()
 
-
 def _safe_ping_conn(conn, timeout=5):
     """Executa SELECT 1 em conn; protege contra erros."""
     try:
@@ -133,7 +132,6 @@ def _safe_ping_conn(conn, timeout=5):
     except Exception:
         logger.debug("Ping falhou numa conexão (ignorado).", exc_info=False)
         return False
-
 
 def _heartbeat_loop():
     """Loop que periodicamente pinga heartbeat dedicado e conexões ativas.
@@ -195,7 +193,6 @@ def _heartbeat_loop():
             logger.exception("Erro no heartbeat ao forçar devoluções de proxies antigos")
 
     logger.info("Heartbeat do pool finalizado.")
-
 
 # ---------------------------
 # ConnectionProxy (com watchdog)
@@ -410,7 +407,6 @@ class ConnectionProxy:
             raise AttributeError(f"conexão fechada/devolvida: {item}")
         return getattr(conn, item)
 
-
 # ---------------------------
 # Encerramento / utilitários
 # ---------------------------
@@ -469,7 +465,6 @@ def fechar_todas_conexoes():
     except Exception:
         pass
 
-
 def imprimir_metricas_pool():
     """Imprime métricas básicas do pool e proxies ativas."""
     try:
@@ -488,7 +483,6 @@ def imprimir_metricas_pool():
         print(f"METRICAS_POOL: total_checkouts={tc} total_returns={tr} forced_gc_returns={tf} active_proxies={ap} pool_max={pool_max}")
     except Exception:
         logger.exception("Falha ao imprimir métricas do pool")
-
 
 def obter_metricas_uso():
     """Retorna dicionário com métricas úteis (para logs/monitor)."""
@@ -509,7 +503,6 @@ def obter_metricas_uso():
         "active_proxies": active,
         "pool_max": getattr(_pool, "maxconn", None) if _pool else None,
     }
-
 
 # ---------------------------
 # Função pública: conectar(...)
