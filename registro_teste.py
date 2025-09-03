@@ -360,6 +360,14 @@ class RegistroTeste(tk.Toplevel):
         style.theme_use("alt")   # mantém seu tema
         style.configure(f"{self._prefix}.Treeview", rowheight=20)
         style.configure(f"{self._prefix}.Treeview.Heading", font=("Arial", 10, "bold"))
+        sel_bg = '#2980B9'   # azul da sua imagem
+        sel_fg = 'white'     # texto branco como na imagem
+
+        style.map(
+            f"{self._prefix}.Treeview",
+            background=[('selected', sel_bg)],
+            foreground=[('selected', sel_fg)]
+        )
         self.tree.config(height=10)
 
     def carregar_dados(self, event):
