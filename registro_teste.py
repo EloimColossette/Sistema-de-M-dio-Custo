@@ -1,3 +1,4 @@
+# registro_teste.py
 import tkinter as tk
 from tkinter import ttk, messagebox, font as tkfont, filedialog
 from conexao_db import conectar
@@ -112,6 +113,7 @@ class RegistroTeste(tk.Toplevel):
                 self.area_entry = e
                 # NÃO aplicar _on_decimal_key aqui
                 e.bind("<KeyRelease>", self._on_area_key, add="+")
+                e.bind("<FocusOut>", self._on_area_key, add="+")      # garante recálculo/limpeza ao perder foco
                 e.bind("<Double-Button-1>", self._reset_area_auto, add="+")
                 # -> cor de fundo para destacar que é campo com cálculo automático
                 try:
@@ -226,10 +228,23 @@ class RegistroTeste(tk.Toplevel):
         # Função de formatação de data
         def formatar_data(event):
             entry = event.widget
-            data = ''.join(filter(str.isdigit, entry.get()))[:8]
-            if len(data)>=2: data=data[:2]+'/'+data[2:]
-            if len(data)>=5: data=data[:5]+'/'+data[5:]
-            entry.delete(0, tk.END); entry.insert(0,data)
+            digits = ''.join(ch for ch in entry.get() if ch.isdigit())[:8]
+
+            parts = []
+            if len(digits) >= 2:
+                parts.append(digits[:2])
+                if len(digits) >= 4:
+                    parts.append(digits[2:4])
+                    if len(digits) > 4:
+                        parts.append(digits[4:])
+                else:
+                    parts.append(digits[2:])
+            else:
+                parts.append(digits)
+
+            novo = '/'.join(parts)
+            entry.delete(0, tk.END)
+            entry.insert(0, novo)
 
         # Campos de filtro correspondentes a registro_teste
         filtros = [
@@ -327,7 +342,6 @@ class RegistroTeste(tk.Toplevel):
         Se term == "", exibe tudo.
         """
         term = term.lower().strip()
-        print(f"[DEBUG] _filter_rows() chamado com termo: '{term}'")
         self.tree.delete(*self.tree.get_children())
 
         for row in getattr(self, 'all_rows', []):
@@ -351,9 +365,6 @@ class RegistroTeste(tk.Toplevel):
             ]
             if not term or any(term in str(v).lower() for v in vals):
                 self.tree.insert("", "end", iid=str(rec_id), values=vals)
-
-        shown = len(self.tree.get_children())
-        print(f"[DEBUG] linhas exibidas após filtro: {shown}")
 
     def configure_treeview(self):
         style = ttk.Style(self)
@@ -500,10 +511,30 @@ class RegistroTeste(tk.Toplevel):
         Insere no campo Área somente se o usuário não tiver
         feito uma edição manual (self.area_manual == False)
         ou caso o campo Área contenha exatamente o último valor auto.
+        Se Dimensões for apagado, limpa também Área (e MPa).
         """
-        if event and event.keysym == "Tab":
+        if event and getattr(event, "keysym", None) == "Tab":
             return
         txt = (self.dim_entry.get().strip() if hasattr(self, "dim_entry") else "")
+
+        # Se Dimensões foi limpada -> limpar Área e MPa
+        if txt == "":
+            try:
+                self.area_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_area = ""
+            self.area_manual = False
+
+            # Limpa MPa também (mesmo que estivesse em modo manual)
+            try:
+                self.lr_mpa_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_mpa = ""
+            self.mpa_manual = False
+            return
+
         norm = self.normalize_number(txt)  # retorna string com ponto decimal ou None
         if not norm:
             return
@@ -529,12 +560,48 @@ class RegistroTeste(tk.Toplevel):
             self.last_auto_area = area_str
             self.area_manual = False
 
+        # solicita recalcular MPa depois do loop de eventos, garantindo que o Entry já
+        # contenha o novo valor (protege contra leituras prematuras).
+        try:
+            self.after(1, lambda: self._on_lr_n_key(None))
+        except Exception:
+            pass
+
     def _on_area_key(self, event=None):
         """
-        Chamado quando o usuário digita no campo 'Área' — marca que o valor
-        foi editado manualmente para evitar sobrescrita automática.
+        Chamado quando o usuário digita no campo 'Área' ou perde o foco — marca que o valor
+        foi editado manualmente para evitar sobrescrita automática e solicita recálculo do MPa.
+        Se o campo Área for limpo, também limpamos o MPa (mesmo que MPa estivesse em modo manual).
         """
         self.area_manual = True
+
+        # Agendamos a ação para depois do loop de eventos: se área vazia -> limpar MPa,
+        # caso contrário -> recalcular MPa (se possível).
+        try:
+            self.after(1, self._handle_area_change)
+        except Exception:
+            try:
+                self._handle_area_change()
+            except Exception:
+                pass
+
+    def _handle_area_change(self):
+        """Helper chamado logo após alteração na área (garante conteúdo atualizado)."""
+        area_txt = (self.area_entry.get().strip() if hasattr(self, "area_entry") else "")
+        if area_txt == "":
+            # limpa MPa sempre que área for apagada
+            try:
+                self.lr_mpa_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_mpa = ""
+            self.mpa_manual = False
+        else:
+            # tenta recalcular o MPa (se N estiver presente)
+            try:
+                self._on_lr_n_key(None)
+            except Exception:
+                pass
 
     def _reset_area_auto(self, event=None):
         """
@@ -547,10 +614,13 @@ class RegistroTeste(tk.Toplevel):
 
     def _on_lr_n_key(self, event=None):
         """
-        Recalcula o MPa sempre que o usuário digitar em L.R. Tração (N).
+        Recalcula o MPa sempre que o usuário digitar em L.R. Tração (N) ou quando a
+        área for atualizada (manual/automática).
         Fórmula: MPa = N / Área
+
+        Se N ou Área estiverem vazios/invalidos, limpa o campo MPa (como solicitado).
         """
-        if event and event.keysym == "Tab":
+        if event and getattr(event, "keysym", None) == "Tab":
             return
         txt_n = (self.lr_n_entry.get().strip() if hasattr(self, "lr_n_entry") else "")
         txt_area = (self.area_entry.get().strip() if hasattr(self, "area_entry") else "")
@@ -558,20 +628,46 @@ class RegistroTeste(tk.Toplevel):
         norm_n = self.normalize_number(txt_n)
         norm_area = self.normalize_number(txt_area)
 
+        # Se algum dos dois estiver vazio/invalid -> limpar MPa
         if not norm_n or not norm_area:
+            try:
+                self.lr_mpa_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_mpa = ""
+            self.mpa_manual = False
             return
 
         try:
             val_n = Decimal(norm_n)
             val_area = Decimal(norm_area)
             if val_area == 0:
+                # evita divisão por zero: limpamos MPa
+                try:
+                    self.lr_mpa_entry.delete(0, tk.END)
+                except Exception:
+                    pass
+                self.last_auto_mpa = ""
+                self.mpa_manual = False
                 return
         except Exception:
+            try:
+                self.lr_mpa_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_mpa = ""
+            self.mpa_manual = False
             return
 
         try:
             mpa_dec = (val_n / val_area).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         except Exception:
+            try:
+                self.lr_mpa_entry.delete(0, tk.END)
+            except Exception:
+                pass
+            self.last_auto_mpa = ""
+            self.mpa_manual = False
             return
 
         # formata com vírgula
@@ -594,22 +690,15 @@ class RegistroTeste(tk.Toplevel):
         self.mpa_manual = False
         self._on_lr_n_key(event)
 
+
     def normalize_number(self, s):
-        """
-        Recebe uma string como “14.570,0000” ou “14570.0000” e retorna
-        algo como “14570.0000” pronto p/ Decimal().
-        """
         s = s.strip()
         if not s:
             return None
-
-        # se tem ambos, . = milhar, , = decimal
         if "." in s and "," in s:
             s = s.replace(".", "").replace(",", ".")
-        # se só tem vírgula, ela é decimal
         elif "," in s:
             s = s.replace(",", ".")
-        # se só tem ponto, assume-se que é decimal e deixamos
         return s
 
     def add_tooltip(self, widget, text, delay=400):
