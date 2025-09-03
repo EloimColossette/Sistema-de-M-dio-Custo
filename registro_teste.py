@@ -690,7 +690,6 @@ class RegistroTeste(tk.Toplevel):
         self.mpa_manual = False
         self._on_lr_n_key(event)
 
-
     def normalize_number(self, s):
         s = s.strip()
         if not s:
