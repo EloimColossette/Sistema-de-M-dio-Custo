@@ -1,11 +1,22 @@
+# conexao_db.py
+"""
+Pool de conexões PostgreSQL com inicialização não bloqueante na MainThread.
+
+- Se conectar() for chamado na MainThread e o pool ainda não existir, retorna
+  um AsyncConnectionProxy instantaneamente e inicializa o pool em background.
+- Quando o pool já estiver pronto, conectar() retorna ConnectionProxy (síncrono).
+- AsyncConnectionProxy inclui um fallback que tenta obter um ConnectionProxy real
+  por um curto período se código acessar .cursor() ou outros atributos síncronos.
+"""
+
 import os
 import time
 import threading
 import logging
 import weakref
 import concurrent.futures
-from psycopg2 import connect
 from psycopg2 import pool as pg_pool
+from psycopg2 import connect as pg_connect
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +57,7 @@ _pool_lock = threading.Lock()
 _conn_params = None
 
 _active_proxies = weakref.WeakSet()
+_active_proxies_lock = threading.Lock()
 
 _heartbeat_thread = None
 _heartbeat_stop = threading.Event()
@@ -58,6 +70,7 @@ _total_checkouts = 0
 _total_returns = 0
 _total_forced_gc_returns = 0
 _metrics_lock = threading.Lock()
+
 
 # ---------------------------
 # Internal helpers
@@ -97,7 +110,7 @@ def _init_pool_if_needed(minconn=_POOL_MIN, maxconn=_POOL_MAX, **connect_kwargs)
 
         # tenta criar conexão dedicada para heartbeat (não usar pool)
         try:
-            _heartbeat_conn = connect(**_conn_params)
+            _heartbeat_conn = pg_connect(**_conn_params)
             try:
                 _heartbeat_conn.set_session(autocommit=True)
             except Exception:
@@ -151,7 +164,7 @@ def _heartbeat_loop():
         try:
             if _heartbeat_conn is None:
                 try:
-                    _heartbeat_conn = connect(**_conn_params)
+                    _heartbeat_conn = pg_connect(**_conn_params)
                     try:
                         _heartbeat_conn.set_session(autocommit=True)
                     except Exception:
@@ -165,7 +178,8 @@ def _heartbeat_loop():
 
         # 2) ping em proxies ativas (conexões que foram entregues e ainda não devolvidas)
         try:
-            proxies = list(_active_proxies)
+            with _active_proxies_lock:
+                proxies = list(_active_proxies)
             for p in proxies:
                 try:
                     real_conn = getattr(p, "_conn", None)
@@ -179,7 +193,8 @@ def _heartbeat_loop():
         # 3) força devolução de proxies que estão emprestados por tempo excessivo
         try:
             now = time.monotonic()
-            proxies = list(_active_proxies)
+            with _active_proxies_lock:
+                proxies = list(_active_proxies)
             for p in proxies:
                 try:
                     ts = getattr(p, "_checkout_ts", None)
@@ -220,7 +235,8 @@ class ConnectionProxy:
         self._watchdog = None
 
         try:
-            _active_proxies.add(self)
+            with _active_proxies_lock:
+                _active_proxies.add(self)
         except Exception:
             logger.debug("Falha ao registrar proxy no conjunto de proxies ativas", exc_info=False)
         with _metrics_lock:
@@ -284,7 +300,8 @@ class ConnectionProxy:
         finally:
             # remove do conjunto de proxies ativas
             try:
-                _active_proxies.discard(self)
+                with _active_proxies_lock:
+                    _active_proxies.discard(self)
             except Exception:
                 pass
             with _metrics_lock:
@@ -366,7 +383,8 @@ class ConnectionProxy:
         finally:
             # remove do conjunto de proxies ativas (se presente)
             try:
-                _active_proxies.discard(self)
+                with _active_proxies_lock:
+                    _active_proxies.discard(self)
             except Exception:
                 pass
             with _metrics_lock:
@@ -436,6 +454,39 @@ def _init_executor_if_needed(max_workers_hint=None):
         logger.exception("Falha ao iniciar DB executor")
 
 
+def _direct_execute(sql, params=None, commit=False, fetch=False, statement_timeout_ms=None, conn_params=None):
+    """
+    Abre uma conexão direta (psycopg2.connect) usando conn_params,
+    executa e fecha. Retorna rows se fetch=True.
+    Projetado para ser executado em executor (background).
+    """
+    if conn_params is None:
+        raise RuntimeError("_direct_execute precisa de conn_params válidos")
+    conn = None
+    cur = None
+    try:
+        conn = pg_connect(**conn_params)
+        try:
+            cur = conn.cursor()
+            if statement_timeout_ms is not None:
+                cur.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
+            cur.execute(sql, params or ())
+            if commit:
+                conn.commit()
+            if fetch:
+                rows = cur.fetchall()
+                return rows
+            return None
+        finally:
+            if cur is not None:
+                try: cur.close()
+                except Exception: pass
+    finally:
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+
+
 def _db_worker_execute(sql, params=None, commit=False, fetch=False, statement_timeout_ms=None):
     """
     Executa query no worker: obtém conexão com `conectar()`, executa, (commit opcional) e fecha.
@@ -446,6 +497,12 @@ def _db_worker_execute(sql, params=None, commit=False, fetch=False, statement_ti
         conn = conectar()  # usar conectar() garante que o pool/executor estejam prontos
         if conn is None:
             raise RuntimeError("Não foi possível obter conexão para execução de query")
+        # Se receber AsyncConnectionProxy (caso raro aqui), usamos sua API para submeter
+        if hasattr(conn, 'execute_async') and not hasattr(conn, 'cursor'):
+            fut = conn.submit(sql, params=params, commit=commit, fetch=fetch, statement_timeout_ms=statement_timeout_ms)
+            return fut.result()
+
+        # caso padrão: ConnectionProxy (síncrono)
         with conn:
             cur = conn.cursor()
             try:
@@ -534,6 +591,144 @@ def execute_sync_with_timeout(sql, params=None, commit=False, fetch=False,
 
 
 # ---------------------------
+# AsyncConnectionProxy: retornado imediatamente na MainThread se pool não existir
+# ---------------------------
+class AsyncConnectionProxy:
+    """
+    Proxy retornado rapidamente quando conectar() é chamado da MainThread
+    e o pool ainda nao foi inicializado. Fornece API assíncrona:
+      - execute_async(...)
+      - submit(...)
+    Também fornece um fallback limitado: se o código tentar usar .cursor()
+    ou outro atributo, o proxy aguarda curto período pelo pool e encaminha
+    para um ConnectionProxy real (se o pool ficar pronto).
+    """
+
+    def __init__(self, conn_params):
+        self._conn_params = conn_params
+        _init_executor_if_needed()
+        self._pending = []  # lista de futures (opcional para tracking)
+        self._closed = False
+
+    # ---------- helpers de espera ----------
+    def _wait_for_pool_ready(self, timeout=2.0, poll=0.05):
+        """Espera até `timeout` segundos o pool ficar pronto. Retorna True se pronto."""
+        end = time.monotonic() + float(timeout)
+        while _pool is None and time.monotonic() < end:
+            time.sleep(poll)
+        return _pool is not None
+
+    def _get_sync_proxy_or_none(self, timeout=2.0):
+        """
+        Se o pool ficar pronto dentro do timeout, obtém e retorna um ConnectionProxy
+        chamando conectar() (o fluxo normal). Caso contrário retorna None.
+        """
+        if not self._wait_for_pool_ready(timeout=timeout):
+            return None
+        # agora que o pool deve estar pronto, chamar conectar() deve retornar ConnectionProxy
+        try:
+            p = conectar()  # isto obtém ConnectionProxy síncrono (rápido se pool pronto)
+            return p
+        except Exception:
+            return None
+
+    # ---------- compatibilidade com cursor() (fallback) ----------
+    def cursor(self, *args, timeout=2.0, **kwargs):
+        """
+        Tenta obter um ConnectionProxy real dentro de `timeout` segundos e
+        retorna sua cursor() — se não for possível, levanta RuntimeError com instrução.
+        Atenção: isso pode bloquear até `timeout` segundos.
+        """
+        p = self._get_sync_proxy_or_none(timeout=timeout)
+        if p is None:
+            raise RuntimeError(
+                "Pool ainda não pronto (timeout). Use execute_async/submit para chamadas não-bloqueantes "
+                "ou inicialize o pool em background no startup."
+            )
+        # p é um ConnectionProxy: delega
+        return p.cursor(*args, **kwargs)
+
+    # ---------- delegação genérica (tentativa) ----------
+    def __getattr__(self, name):
+        """
+        Se algum código acessar outro método/atributo (por exemplo commit/rollback),
+        tentamos obter um proxy síncrono rapidamente e delegar. Caso não seja possível,
+        caímos para as APIs assíncronas ou erro instrutivo.
+        """
+        # métodos óbvios que suportamos assíncrono: execute_async, submit, close estão aqui
+        if name in ("execute_async", "submit", "close"):
+            return object.__getattribute__(self, name)
+
+        # caso contrário, tentamos obter proxy síncrono com timeout pequeno
+        p = self._get_sync_proxy_or_none(timeout=1.5)
+        if p is None:
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{name}' (pool não pronto). "
+                "Use execute_async/submit ou aguarde a inicialização do pool."
+            )
+        return getattr(p, name)
+
+    # ---------- APIs assíncronas existentes ----------
+    def submit(self, sql, params=None, commit=False, fetch=False, statement_timeout_ms=None):
+        if self._closed:
+            raise RuntimeError("Proxy já fechado")
+        fut = _executor.submit(
+            _direct_execute,
+            sql, params, commit, fetch, statement_timeout_ms, self._conn_params
+        )
+        try:
+            self._pending.append(fut)
+        except Exception:
+            pass
+
+        def _done(_f):
+            try:
+                self._pending.remove(_f)
+            except Exception:
+                pass
+        fut.add_done_callback(_done)
+        return fut
+
+    def execute_async(self, sql, params=None, commit=False, fetch=False,
+                      statement_timeout_ms=None, callback=None, error_callback=None):
+        """
+        Conveniência: submete a execução e chama callback(result) no thread do executor.
+        ATENÇÃO: callback é executado no thread do executor — se for atualizar UI, use root.after(...)
+        """
+        fut = self.submit(sql, params=params, commit=commit, fetch=fetch, statement_timeout_ms=statement_timeout_ms)
+
+        if callback or error_callback:
+            def _done_cb(f):
+                try:
+                    res = f.result()
+                    if callback:
+                        try:
+                            callback(res)
+                        except Exception:
+                            logger.exception("Erro no callback de sucesso (AsyncConnectionProxy)")
+                except Exception as e:
+                    if error_callback:
+                        try:
+                            error_callback(e)
+                        except Exception:
+                            logger.exception("Erro no callback de erro (AsyncConnectionProxy)")
+                    else:
+                        logger.exception("Erro na execução assíncrona (AsyncConnectionProxy)")
+            fut.add_done_callback(_done_cb)
+        return fut
+
+    def close(self):
+        # não força nada — apenas marca fechado e deixa pendências terminarem
+        self._closed = True
+
+    def __enter__(self):
+        raise RuntimeError("AsyncConnectionProxy não suporta 'with' (para evitar bloqueio). Use execute_async/submit.")
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+
+# ---------------------------
 # Encerramento / utilitários
 # ---------------------------
 def fechar_todas_conexoes():
@@ -548,7 +743,8 @@ def fechar_todas_conexoes():
 
     # libera proxies ativas (devolve ao pool)
     try:
-        proxies = list(_active_proxies)
+        with _active_proxies_lock:
+            proxies = list(_active_proxies)
         for p in proxies:
             try:
                 p.close()
@@ -605,7 +801,8 @@ def fechar_todas_conexoes():
 def imprimir_metricas_pool():
     """Imprime métricas básicas do pool e proxies ativas."""
     try:
-        ap = len(list(_active_proxies))
+        with _active_proxies_lock:
+            ap = len(list(_active_proxies))
     except Exception:
         ap = -1
     try:
@@ -625,7 +822,8 @@ def imprimir_metricas_pool():
 def obter_metricas_uso():
     """Retorna dicionário com métricas úteis (para logs/monitor)."""
     try:
-        active = len(list(_active_proxies))
+        with _active_proxies_lock:
+            active = len(list(_active_proxies))
     except Exception:
         active = -1
     with _metrics_lock:
@@ -651,9 +849,11 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
     Mantém compatibilidade com sua função original:
       conn = conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None)
 
-    Observação importante:
-    - O executor de background é inicializado AQUI (dentro de conectar) logo após o pool ser criado,
-      garantindo que a execução em background só exista quando o pool estiver pronto.
+    Comportamento especial:
+    - Se chamado da MainThread e o pool NÃO existir, inicia inicialização em background
+      e retorna AsyncConnectionProxy imediatamente (não bloqueante).
+    - Se não estiver na MainThread (worker thread) e o pool não existir, inicializa
+      sincronamente (blocking) e retorna ConnectionProxy.
     """
     global _pool, _conn_params, _pool_lock, _checkout_semaphore, _executor
 
@@ -684,19 +884,146 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
     minc = minconn if minconn is not None else _POOL_MIN
     maxc = maxconn if maxconn is not None else _POOL_MAX
 
-    # Inicializa pool quando for a primeira chamada
+    # Se o pool já foi inicializado -> comportamento normal e rápido
+    if _pool is not None:
+        # segue fluxo original: adquirir semáforo e getconn()...
+        _semaphore = _checkout_semaphore
+        if _semaphore is None:
+            _semaphore = threading.BoundedSemaphore(maxc)
+
+        try:
+            acquired = _semaphore.acquire(timeout=_SEM_TIMEOUT)
+        except Exception:
+            acquired = False
+
+        if not acquired:
+            logger.error("Timeout ao aguardar recurso do pool (semaphore).")
+            return None
+
+        attempts = 3
+        delay = 0.15
+        last_exc = None
+
+        for attempt in range(1, attempts + 1):
+            real_conn = None
+            try:
+                real_conn = _pool.getconn()
+
+                # se conexão veio 'closed' ou inválida, fecha e recria
+                if real_conn is None or (hasattr(real_conn, "closed") and real_conn.closed):
+                    logger.warning("Conexão retirada do pool estava closed/nula — criando nova conexão direta.")
+                    try:
+                        if real_conn is not None:
+                            real_conn.close()
+                    except Exception:
+                        pass
+                    real_conn = pg_connect(**_conn_params)
+
+                # valida via ping; se ping falhar, tenta recriar connection direta
+                if not _safe_ping_conn(real_conn):
+                    logger.debug("Ping falhou na conexão retirada do pool — recriando conexão direta.")
+                    try:
+                        real_conn.close()
+                    except Exception:
+                        pass
+                    real_conn = pg_connect(**_conn_params)
+
+                # aplicar configurações de sessão (encoding, timeouts)
+                try:
+                    try:
+                        real_conn.set_client_encoding("UTF8")
+                    except Exception:
+                        pass
+
+                    cur = real_conn.cursor()
+                    try:
+                        cur.execute(f"SET statement_timeout = {int(_STATEMENT_TIMEOUT_MS)}")
+                        cur.execute("SET client_min_messages = WARNING")
+                    finally:
+                        cur.close()
+                except Exception:
+                    logger.debug("Falha ao aplicar configurações de sessão (não crítico).", exc_info=False)
+
+                # retorno: proxy que gerencia devolução + watchdog
+                proxy = ConnectionProxy(real_conn)
+                return proxy
+
+            except Exception as e:
+                last_exc = e
+                logger.exception("Erro ao obter conexão do pool (tentativa %d/%d): %s", attempt, attempts, e)
+
+                # se real_conn foi criado mas algo deu errado, tenta devolver/fechar para não vazar
+                try:
+                    if 'real_conn' in locals() and real_conn is not None:
+                        try:
+                            if _pool:
+                                _pool.putconn(real_conn)
+                            else:
+                                real_conn.close()
+                        except Exception:
+                            try:
+                                real_conn.close()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                time.sleep(delay)
+                delay *= 2
+                continue
+
+        # se chegou aqui, falhou todas as tentativas -> liberar semáforo e retornar None
+        try:
+            if _checkout_semaphore is not None:
+                _checkout_semaphore.release()
+            else:
+                try:
+                    _semaphore.release()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        logger.error("Não foi possível obter conexão do pool após %d tentativas. Último erro: %s", attempts, repr(last_exc))
+        return None
+
+    # --- Novo comportamento: se estiver na MainThread e pool ainda não criado,
+    # inicializa o pool em background e retorna AsyncConnectionProxy IMEDIATAMENTE ---
+    if threading.current_thread().name == "MainThread" and _pool is None:
+        with _pool_lock:
+            if _conn_params is None:
+                _conn_params = conn_kwargs.copy()
+                _conn_params.setdefault("connect_timeout", _CONNECT_TIMEOUT)
+                _conn_params.setdefault("keepalives", 1)
+                _conn_params.setdefault("keepalives_idle", _CONN_KEEPALIVE_IDLE)
+                _conn_params.setdefault("keepalives_interval", _CONN_KEEPALIVE_INTERVAL)
+                _conn_params.setdefault("keepalives_count", _CONN_KEEPALIVE_COUNT)
+                _conn_params.setdefault("application_name", _APPLICATION_NAME)
+
+        def _bg_init():
+            try:
+                _init_pool_if_needed(minconn=minc, maxconn=maxc, **_conn_params)
+            except Exception:
+                logger.exception("Inicialização background do pool falhou")
+
+        t = threading.Thread(target=_bg_init, daemon=True, name="db-init-bg")
+        t.start()
+
+        # garante executor também
+        _init_executor_if_needed(maxc)
+
+        # retorna proxy assíncrono imediato (não bloqueante)
+        return AsyncConnectionProxy(_conn_params)
+
+    # --- Caso padrão (não main thread ou pool já existente) continua o fluxo síncrono normal ---
     try:
         _init_pool_if_needed(minconn=minc, maxconn=maxc, **conn_kwargs)
     except Exception:
         logger.exception("Não foi possível inicializar pool de conexões")
         return None
 
-    # *** Inicializa executor AQUI (dentro de conectar), como requisitado ***
-    try:
-        # hint para tamanho do executor: usamos maxc (tamanho do pool) como limite superior
-        _init_executor_if_needed(max_workers_hint=maxc)
-    except Exception:
-        logger.exception("Falha ao inicializar executor (não crítico)")
+    # inicializa executor etc.
+    _init_executor_if_needed(maxc)
 
     # usa o semaphore criado no init do pool
     _semaphore = _checkout_semaphore
@@ -732,7 +1059,7 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
                         real_conn.close()
                 except Exception:
                     pass
-                real_conn = connect(**_conn_params)
+                real_conn = pg_connect(**_conn_params)
 
             # valida via ping; se ping falhar, tenta recriar connection direta
             if not _safe_ping_conn(real_conn):
@@ -741,7 +1068,7 @@ def conectar(ip=None, porta=None, usuario=None, senha=None, dbname=None, minconn
                     real_conn.close()
                 except Exception:
                     pass
-                real_conn = connect(**_conn_params)
+                real_conn = pg_connect(**_conn_params)
 
             # aplicar configurações de sessão (encoding, timeouts)
             try:
