@@ -1,14 +1,3 @@
-# conexao_db.py
-"""
-Pool de conexões PostgreSQL com inicialização não bloqueante na MainThread.
-
-- Se conectar() for chamado na MainThread e o pool ainda não existir, retorna
-  um AsyncConnectionProxy instantaneamente e inicializa o pool em background.
-- Quando o pool já estiver pronto, conectar() retorna ConnectionProxy (síncrono).
-- AsyncConnectionProxy inclui um fallback que tenta obter um ConnectionProxy real
-  por um curto período se código acessar .cursor() ou outros atributos síncronos.
-"""
-
 import os
 import time
 import threading
