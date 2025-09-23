@@ -64,6 +64,38 @@ class MediaCusto:
         btn_voltar.grid(row=0, column=0, padx=10, pady=5)
         btn_exportar.grid(row=0, column=1, padx=10, pady=5)
 
+        # ---- Botão de Ajuda discreto (aparece ao lado dos botões Voltar / Exportar) ----
+        self.botao_ajuda_media_pequeno = tk.Button(
+            frame_botoes,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=self._abrir_ajuda_media_modal
+        )
+        # coloca na mesma linha, coluna 2 (ajuste se quiser mais deslocamento)
+        self.botao_ajuda_media_pequeno.grid(row=0, column=2, padx=10, pady=5)
+
+        # efeito hover
+        self.botao_ajuda_media_pequeno.bind("<Enter>", lambda e: self.botao_ajuda_media_pequeno.config(bg="#3b5566"))
+        self.botao_ajuda_media_pequeno.bind("<Leave>", lambda e: self.botao_ajuda_media_pequeno.config(bg="#2c3e50"))
+
+        # Tooltip (utiliza seu utilitário _create_tooltip se existir)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_media_pequeno, "Ajuda — Média de Custo (F1)")
+        except Exception:
+            pass
+
+        # Atalho F1 (vinculado à janela de média de custo) - já existia, mas garantir localmente
+        try:
+            self.janela_media_custo.bind("<F1>", lambda e: self._abrir_ajuda_media_modal())
+        except Exception:
+            pass
+
         self.janela_media_custo.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         try:
@@ -127,6 +159,248 @@ class MediaCusto:
 
         frame_tabela.grid_rowconfigure(0, weight=1)
         frame_tabela.grid_columnconfigure(0, weight=1)
+
+    def _create_tooltip(self, widget, text, delay=450):
+        """Tooltip melhorado: quebra de linha automática e ajuste para não sair da tela."""
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            # calcula largura máxima adequada para o tooltip (não maior que a tela)
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            wrap_len = min(360, max(200, screen_w - 80))  # largura do texto em pixels, com limites
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial centrada horizontalmente sobre o widget, abaixo do widget
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            # força o cálculo do tamanho real do tooltip
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajustar horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajustar verticalmente: se não couber embaixo, tenta acima do widget
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    # caso não caiba nem acima nem abaixo, limita para caber na tela
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_media_modal(self, contexto=None):
+        """Abre modal de ajuda explicando a janela, as 3 abas e a exportação."""
+        try:
+            modal = tk.Toplevel(self.janela_media_custo)
+            modal.title("Ajuda — Média de Custo")
+            modal.transient(self.janela_media_custo)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões e centralização
+            w, h = 900, 640
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (tenta aplicar, falha silenciosa se não disponível)
+            try:
+                caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
+                aplicar_icone(modal, caminho_icone)
+            except Exception:
+                pass
+
+            # Cabeçalho do modal
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Média de Custo", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: nav esquerda + conteúdo direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0,12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10,6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Aba ICM (ICM 18%)",
+                "Aba Sudeste (ICM 12%)",
+                "Aba Centro-Oeste / Nordeste (7%)",
+                "Exportação",
+                "Boas Práticas",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0,10))
+
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # Conteúdos (ajustei para refletir o que seu código faz; vejo isso em media_custo.py). :contentReference[oaicite:1]{index=1}
+            contents = {}
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "Esta janela apresenta a Tabela de Produtos com cálculos de média ponderada do custo\n"
+                "e simulações com acréscimos. Use as abas para ver as versões por regime/região fiscal."
+            )
+
+            contents["Aba ICM (ICM 18%)"] = (
+                "ICM 18% — explicação\n\n"
+                "- Aba padrão com cálculo usando fatores aplicados no projeto (métodos em MediaCusto).\n"
+                "- Colunas: Produto, Estoque, Média de Custo do Estoque, Média Custo Empresa, Custo 5/10/15/20%.\n"
+                "- A linha TOTAL agrega estoque e as médias ponderadas."
+            )
+
+            contents["Aba Sudeste (ICM 12%)"] = (
+                "Região Sudeste (ICM 12%) — detalhes operacionais\n\n"
+                "Esta aba aplica a fórmula ajustada para o regime/regra fiscal do Sudeste, usando alíquota efetiva de 12%.\n\n"
+                "O que muda em relação à aba ICM 18%:\n"
+                " - O fator de conversão aplicado às médias ponderadas é diferente (reduz o impacto tributário).\n"
+                " - São usados os mesmos dados de entrada (estoque e custos do banco), porém o resultado final\n"
+                "   (Média de Custo do Estoque / Custo Empresa) é recalculado com coeficientes próprios desta região.\n\n"
+                "Observações práticas:\n"
+                " - Use esta aba para simular preços de venda/markups quando o cliente ou operação estiver no Sudeste.\n"
+                " - Se os valores estiverem muito distantes da aba ICM 18%, verifique as fórmulas em\n"
+                "   'aba_sudeste_media_custo.py' (funções que ajustam alíquotas e coeficientes).\n"
+                " - Recomendação: antes de fechar a negociação, exporte para Excel e valide o cálculo com a contabilidade."
+            )
+
+            contents["Aba Centro-Oeste / Nordeste (7%)"] = (
+                "Centro-Oeste / Nordeste (7%) — detalhes operacionais\n\n"
+                "Nesta aba os cálculos usam o coeficiente definido para regiões com alíquota efetiva aproximada de 7%.\n\n"
+                "O que considerar:\n"
+                " - Além de alterar apenas a alíquota, o módulo pode aplicar ajustes regionais de custo logístico\n"
+                "   ou incentivos/fatores locais (ver 'aba_centro_oeste_media_custo.py').\n"
+                " - Use esta aba para avaliar margens em centros de distribuição localizados nessas regiões,\n"
+                "   pois custos e tributações podem reduzir o preço final comparado ao Sudeste/ICM 18%.\n\n"
+                "Boas práticas:\n"
+                " - Compare as três abas antes de definir o preço de venda para um cliente: ICM 18% (base),\n"
+                "   Sudeste (12%) e Centro-Oeste/Nordeste (7%). Isso ajuda a mapear risco de margem por região.\n"
+                " - Ao detectar discrepâncias grandes, verifique as tabelas auxiliares (frete, armazenagem) e\n"
+                "   valide se algum ajuste extra está sendo aplicado no módulo regional."
+            )
+
+            contents["Exportação"] = (
+                "Exportação\n\n"
+                "- O botão 'Exportar para Excel' (na parte inferior da janela) chama a função\n"
+                "  exportar_notebook_para_excel(self.notebook) e salva cada aba em planilhas separadas.\n"
+                "- Verifique permissões de escrita e selecione um diretório com espaço suficiente.\n"
+                "- Para exportar em PDF, podemos acrescentar botão/rotina similar se desejar."
+            )
+
+            contents["Boas Práticas"] = (
+                "Boas Práticas\n\n"
+                "- Recarregue os dados antes de exportar para garantir consistência.\n"
+            )
+
+            contents["FAQ"] = (
+                "FAQ\n\n"
+                "Q: Posso exportar apenas uma aba?\n"
+                "A: A função atual exporta todo o notebook; posso adaptar para exportar só a aba ativa."
+            )
+
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé com Fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            modal.bind("<Escape>", lambda e: modal.destroy())
+            modal.focus_set()
+            modal.wait_window()
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Média de Custo):", e)
 
     def _on_tab_changed(self, event):
         aba_atual = self.notebook.index(self.notebook.select())
