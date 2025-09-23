@@ -32,9 +32,51 @@ class InterfaceProduto:
         # Chama o método para configurar os estilos da janela Produto
         self._configurar_estilo_produto()
 
-        # Cabeçalho
-        cabecalho = tk.Label(self.janela_base_produto, text="Base de Produtos", font=("Arial", 24, "bold"), bg="#34495e", fg="white", pady=15)
-        cabecalho.pack(fill=tk.X)
+        self.header_container = tk.Frame(self.janela_base_produto, bg="#34495e")
+        self.header_container.pack(fill=tk.X)
+
+        # Label principal (título) — armazenado como atributo caso precise alterar depois
+        self.cabecalho = tk.Label(self.header_container,
+                                text="Base de Produtos",
+                                font=("Arial", 24, "bold"),
+                                bg="#34495e", fg="white", pady=15)
+        self.cabecalho.pack(side="left", fill=tk.X, expand=True)
+
+        # Frame para o botão de ajuda (mantém estilo do cabeçalho)
+        self.help_frame = tk.Frame(self.header_container, bg="#34495e")
+        self.help_frame.pack(side="right", padx=(8, 12), pady=6)
+
+        self.botao_ajuda_produtos = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_produtos_modal()
+        )
+        self.botao_ajuda_produtos.bind("<Enter>", lambda e: self.botao_ajuda_produtos.config(bg="#3b5566"))
+        self.botao_ajuda_produtos.bind("<Leave>", lambda e: self.botao_ajuda_produtos.config(bg="#2c3e50"))
+        self.botao_ajuda_produtos.pack(side="right", padx=(4, 6), pady=4)
+
+        # Tooltip (seu método será adicionado abaixo)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_produtos, "Ajuda — Produtos (F1)")
+        except Exception:
+            pass
+
+        # Atalho F1 (vinculado ao Toplevel desta interface)
+        try:
+            # bind_all no toplevel para garantir funcionamento quando a janela estiver ativa
+            self.janela_base_produto.bind_all("<F1>", lambda e: self._abrir_ajuda_produtos_modal())
+        except Exception:
+            try:
+                self.janela_base_produto.bind("<F1>", lambda e: self._abrir_ajuda_produtos_modal())
+            except Exception:
+                pass
 
         # Frame para Labels e Entradas
         frame_acoes = tk.Frame(self.janela_base_produto, bg="#ecf0f1")
@@ -179,6 +221,288 @@ class InterfaceProduto:
                         highlightbackground="#34495e",
                         highlightthickness=1)
         return style
+
+    def _create_tooltip(self, widget, text, delay=450, max_width=None):
+        """
+        Tooltip melhorado: quebra automática de linhas e ajuste para não sair da tela.
+        - widget: widget alvo
+        - text: texto do tooltip
+        - delay: ms até exibir
+        - max_width: largura máxima do tooltip em pixels (opcional)
+        """
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            # determina wraplength: respeita max_width se passado, senão calcula baseado na tela
+            if max_width:
+                wrap_len = max(120, min(max_width, screen_w - 80))
+            else:
+                wrap_len = min(360, max(200, screen_w - 160))
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial: centrado horizontalmente sobre o widget, abaixo do widget
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajustar horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajustar verticalmente: tenta abaixo; se não couber, tenta acima; senão limita dentro da tela
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_produtos_modal(self, contexto=None):
+        """Modal profissional com explicações: adicionar, editar, excluir, limpar, exportar Excel/PDF."""
+        try:
+            modal = tk.Toplevel(self.janela_base_produto)
+            modal.title("Ajuda — Base de Produtos")
+            modal.transient(self.janela_base_produto)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # aplicar ícone (mesma função que você usa)
+            try:
+                caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
+                aplicar_icone(modal, caminho_icone)
+            except Exception:
+                pass
+
+            # Cabeçalho
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Base de Produtos", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: nav esquerda + conteúdo direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Adicionar Produto",
+                "Editar Produto",
+                "Excluir Produto",
+                "Botão Limpar (Campos)",
+                "Exportar Excel / PDF",
+                "Validações e Boas Práticas",
+                "Exemplos Rápidos",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # Conteúdos detalhados
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "A janela 'Base de Produtos' é o catálogo central dos produtos da empresa. "
+                "Aqui você cadastra o nome do produto e as porcentagens de cobre e zinco que o compõem. "
+                "A Treeview lista os produtos; selecione um item para carregar seus dados nos campos acima."
+            )
+
+            contents["Adicionar Produto"] = (
+                "Adicionar Produto — Passo a passo\n\n"
+                "1) Preencha 'Nome do Produto', 'Porcentagem de Cobre (%)' e 'Porcentagem de Zinco (%)'.\n"
+                "2) Verifique se os valores de porcentagem são numéricos e somam ≤ 100% (ou segundo sua regra).\n"
+                "3) Clique em 'Adicionar'. O sistema calcula um novo ID (menor disponível) e realiza INSERT no banco.\n"
+                "4) Após sucesso, a Treeview é atualizada automaticamente e os campos são limpos.\n\n"
+                "Validações típicas:\n"
+                " - Nome não pode ser vazio.\n"
+                " - Cobre e Zinco devem ser números inteiros ou decimais (ex.: 70 ou 70.5).\n"
+                " - A soma das porcentagens pode ter limites definidos pelo seu processo (valide conforme regra)."
+            )
+
+            contents["Editar Produto"] = (
+                "Editar Produto — Passo a passo\n\n"
+                "1) Selecione o produto na lista (clique na linha).\n"
+                "2) Os campos 'Nome', 'Cobre' e 'Zinco' são preenchidos automaticamente.\n"
+                "3) Alterar os valores desejados e clique em 'Alterar'. O sistema faz UPDATE no banco.\n"
+                "4) Em caso de erro, será exibida mensagem com o motivo; caso contrário a lista é atualizada.\n\n"
+                "Dicas:\n"
+                " - Normalizar nomes (remover acentos) é feito automaticamente pelo método 'remover_acentos'.\n"
+                " - Verifique se outro usuário não alterou o mesmo registro simultaneamente."
+            )
+
+            contents["Excluir Produto"] = (
+                "Excluir Produto — Passo a passo\n\n"
+                "1) Selecione um ou mais produtos na Treeview.\n"
+                "2) Clique em 'Excluir' e confirme a ação na caixa de diálogo.\n"
+                "3) O sistema executa DELETE por ID e notifica o canal de atualização (NOTIFY) para recarregar\n"
+                "   outros relatórios/painéis quando aplicável.\n\n"
+                "Recomendações:\n"
+                " - Faça backup antes de operações em lote.\n"
+                " - Considere desativar em vez de excluir se precisar manter histórico."
+            )
+
+            contents["Botão Limpar (Campos)"] = (
+                "Botão Limpar — comportamento\n\n"
+                " - Ao clicar em 'Limpar', todos os campos de entrada acima são esvaziados.\n"
+                " - Use o botão quando quiser iniciar cadastro de novo produto ou cancelar edição.\n"
+                " - O botão não altera o banco, apenas limpa a interface. Após limpar, o item selecionado na\n"
+                "   Treeview permanece selecionado até que você selecione outro."
+            )
+
+            contents["Exportar Excel / PDF"] = (
+                "Exportar Excel / PDF — como funciona\n\n"
+                "Exportar Excel:\n"
+                "  • Clique em 'Exportar Excel' e escolha o local e nome do arquivo (.xlsx).\n"
+                "  • A função exportar_para_excel(caminho, 'produtos', [colunas]) é chamada e cria a planilha.\n\n"
+                "Exportar PDF:\n"
+                "  • Clique em 'Exportar PDF' e escolha local/nome (.pdf).\n"
+                "  • A função exportar_para_pdf(caminho, 'produtos', cabeçalho, titulo) é chamada.\n\n"
+                "Boas práticas:\n"
+                " - Verifique permissões de escrita no diretório selecionado.\n - Para grandes volumes, exporte em background para não travar a UI (pode-se usar threading)."
+            )
+
+            contents["Validações e Boas Práticas"] = (
+                "Validações e Boas Práticas\n\n"
+                " - Valide entradas numéricas usando try/float ou regex antes de gravar.\n"
+                " - Normalize nomes removendo acentos (já incluso em remover_acentos).\n"
+                " - Use transações e commit apenas após todas as operações concluídas.\n"
+                " - Notifique outros módulos via NOTIFY para manter relatórios atualizados."
+            )
+
+            contents["Exemplos Rápidos"] = (
+                "Exemplos Rápidos\n\n"
+                "Exemplo 1 — Adicionar 'Fio Latão 1mm':\n"
+                "  • Nome: Fio Latão 1mm\n  • Cobre: 70\n  • Zinco: 30\n  • Clique em Adicionar -> lista atualizada.\n\n"
+                "Exemplo 2 — Exportar:\n"
+                "  • Clique em Exportar Excel -> escolha pasta -> abra arquivo gerado para revisar."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Perguntas rápidas\n\n"
+                "Q: Porque a Treeview mostra '70%' quando o banco tem 70?\n"
+                "R: O seu código formata para exibir com '%' para leitura. Internamente o banco mantém números.\n\n"
+                "Q: O export falha ao salvar?\n"
+                "R: Verifique permissões e caminho selecionado; tente salvar em 'Documentos' como teste."
+            )
+
+            # Função para mostrar seção
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            # Inicializa com a primeira seção selecionada
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé: Fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            # Atalhos
+            modal.bind("<Escape>", lambda e: modal.destroy())
+
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Produtos):", e)
 
     def obter_menor_id_disponivel(self):
         """Obtém o menor ID disponível na tabela produtos."""

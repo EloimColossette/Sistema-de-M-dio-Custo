@@ -28,13 +28,52 @@ class InterfaceMateriais:
         # Configura os estilos padrões
         self.configurar_estilos()
         
-        # Cabeçalho com cor de fundo escura e texto branco
-        cabecalho = tk.Label(
-            self.janela_materiais, text="Gerenciamento de Materiais",
+        # ---------- Cabeçalho com container e botão de Ajuda ----------
+        self.header_container = tk.Frame(self.janela_materiais, bg="#34495e")
+        self.header_container.pack(fill=tk.X)
+
+        self.cabecalho = tk.Label(
+            self.header_container,
+            text="Gerenciamento de Materiais",
             font=("Arial", 24, "bold"),
             bg="#34495e", fg="white", pady=15
         )
-        cabecalho.pack(fill=tk.X)
+        self.cabecalho.pack(side="left", fill=tk.X, expand=True)
+
+        # Frame para o botão de ajuda (mesma linha do cabeçalho)
+        self.help_frame = tk.Frame(self.header_container, bg="#34495e")
+        self.help_frame.pack(side="right", padx=(8, 12), pady=6)
+
+        self.botao_ajuda_materiais = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_materiais_modal()
+        )
+        self.botao_ajuda_materiais.bind("<Enter>", lambda e: self.botao_ajuda_materiais.config(bg="#3b5566"))
+        self.botao_ajuda_materiais.bind("<Leave>", lambda e: self.botao_ajuda_materiais.config(bg="#2c3e50"))
+        self.botao_ajuda_materiais.pack(side="right", padx=(4, 6), pady=4)
+
+        # Tooltip (usa o método abaixo)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_materiais, "Ajuda — Materiais (F1)")
+        except Exception:
+            pass
+
+        # Atalho F1 (vinculado ao Toplevel desta interface)
+        try:
+            self.janela_materiais.bind_all("<F1>", lambda e: self._abrir_ajuda_materiais_modal())
+        except Exception:
+            try:
+                self.janela_materiais.bind("<F1>", lambda e: self._abrir_ajuda_materiais_modal())
+            except Exception:
+                pass
 
         # Frame para Labels e Entradas
         frame_acoes = ttk.Frame(self.janela_materiais, style="Custom.TFrame")
@@ -210,7 +249,286 @@ class InterfaceMateriais:
                          borderwidth=2,
                          highlightbackground="#34495e",
                          highlightthickness=1)
-        
+
+    def _create_tooltip(self, widget, text, delay=450):
+        """Tooltip melhorado: quebra de linha automática e ajuste para não sair da tela."""
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            # calcula largura máxima adequada para o tooltip (não maior que a tela)
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            wrap_len = min(360, max(200, screen_w - 80))  # largura do texto em pixels, com limites
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial centrada horizontalmente sobre o widget, abaixo do widget
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            # força o cálculo do tamanho real do tooltip
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajustar horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajustar verticalmente: se não couber embaixo, tenta acima do widget
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    # caso não caiba nem acima nem abaixo, limita para caber na tela
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_materiais_modal(self, contexto=None):
+        """Modal profissional com instruções para Materiais e Fornecedores (Adicionar/Edit/Excluir/Limpar/Exportar)."""
+        try:
+            modal = tk.Toplevel(self.janela_materiais)
+            modal.title("Ajuda — Materiais")
+            modal.transient(self.janela_materiais)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (se aplicável)
+            try:
+                caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
+                aplicar_icone(modal, caminho_icone)
+            except Exception:
+                pass
+
+            # Cabeçalho do modal
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Gerenciamento de Materiais", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: navegação à esquerda + conteúdo à direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Adicionar Material",
+                "Editar Material",
+                "Excluir Material",
+                "Adicionar / Excluir Fornecedor",
+                "Botão Limpar (Campos)",
+                "Exportar Excel / PDF",
+                "Validações e Boas Práticas",
+                "Exemplos Rápidos",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # Conteúdo por seção
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "A tela de Materiais centraliza o cadastro de matérias-primas, valores, fornecedores e agrupamentos.\n"
+                "Use os campos para inserir Nome, Fornecedor, Valor e Grupo. A Treeview lista os registros;\n"
+                "selecione um item para carregar seus dados nos campos."
+            )
+
+            contents["Adicionar Material"] = (
+                "Adicionar Material — Passo a passo\n\n"
+                "1) Preencha 'Nome do Material', selecione/insira o Fornecedor, informe o Valor e escolha o Grupo.\n"
+                "2) Verifique o formato do valor (ex.: 1234,56) e clique em 'Adicionar'.\n"
+                "3) O sistema gera um ID (menor disponível) e executa INSERT no banco; em seguida atualiza a lista.\n\n"
+                "Validações:\n"
+                " - Nome e fornecedor não podem ficar em branco.\n"
+                " - Valor deve ser numérico; use o campo para ver formatação automática.\n"
+            )
+
+            contents["Editar Material"] = (
+                "Editar Material — Passo a passo\n\n"
+                "1) Selecione o material na Treeview.\n"
+                "2) Os campos serão preenchidos automaticamente.\n"
+                "3) Altere Nome / Fornecedor / Valor / Grupo e clique em 'Alterar'. O sistema faz UPDATE no banco.\n"
+                "4) Se houver conflito ou erro de banco, será exibida mensagem com detalhes.\n"
+            )
+
+            contents["Excluir Material"] = (
+                "Excluir Material — Passo a passo\n\n"
+                "1) Selecione um ou mais materiais na lista.\n"
+                "2) Clique em 'Excluir' e confirme na caixa de diálogo.\n"
+                "3) O sistema executa DELETE por ID e envia NOTIFY para atualizar relatórios/painéis.\n\n"
+                "Recomendações:\n"
+                " - Faça backup antes de excluir muitos registros; considere sinalizar/desativar em vez de excluir."
+            )
+
+            contents["Adicionar / Excluir Fornecedor"] = (
+                "Adicionar / Excluir Fornecedor — Passo a passo\n\n"
+                "Adicionar:\n"
+                "  • No campo 'Novo Fornecedor' digite o nome e clique em 'Adicionar'.\n"
+                "  • Se não existir, será incluído na combobox e salvo em config/fornecedores.json.\n\n"
+                "Excluir:\n"
+                "  • Digite o nome do fornecedor no campo 'Novo Fornecedor' e clique em 'Excluir'.\n"
+                "  • O item será removido da combobox e do arquivo JSON.\n\n"
+                "Observações:\n"
+                " - Fornecedores utilizados em materiais existentes não são removidos do banco automaticamente;\n"
+                "   ao excluir um fornecedor, verifique se registros dependentes precisam ser ajustados."
+            )
+
+            contents["Botão Limpar (Campos)"] = (
+                "Botão Limpar — comportamento\n\n"
+                " - Ao clicar em 'Limpar', os campos Nome, Fornecedor, Valor e Grupo são esvaziados.\n"
+                " - O botão não altera o banco de dados; serve apenas para limpar a interface antes de novo cadastro."
+            )
+
+            contents["Exportar Excel / PDF"] = (
+                "Exportar Excel / PDF — como funciona\n\n"
+                "Exportar Excel:\n"
+                "  • Clique em 'Exportar Excel' e escolha local/nome do arquivo (.xlsx).\n"
+                "  • A função exportar_para_excel(caminho, 'materiais', [colunas]) será chamada.\n\n"
+                "Exportar PDF:\n"
+                "  • Clique em 'Exportar PDF' e escolha local/nome (.pdf).\n"
+                "  • A função exportar_para_pdf(caminho, 'materiais', cabeçalhos, 'Base de Materiais') será chamada.\n\n"
+                "Dicas:\n"
+                " - Verifique permissões de gravação no diretório escolhido.\n - Para grandes volumes, execute export em background (threading) para não travar a UI."
+            )
+
+            contents["Validações e Boas Práticas"] = (
+                "Validações e Boas Práticas\n\n"
+                " - Use converter_valor para validar e converter valores.\n"
+                " - Normalize nomes e use transações no banco.\n"
+                " - Dispare NOTIFY para manter painéis/relatórios sincronizados."
+            )
+
+            contents["Exemplos Rápidos"] = (
+                "Exemplos Rápidos\n\n"
+                "Exemplo 1 — Adicionar material:\n"
+                "  • Nome: 'Sucata A'\n  • Fornecedor: 'Termomecanica'\n  • Valor: 1234,56\n  • Grupo: 'Sucata'\n  • Clique em Adicionar → lista atualizada.\n\n"
+                "Exemplo 2 — Exportar:\n"
+                "  • Clique em Exportar PDF → selecione local → abra o arquivo para conferência."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Materiais / Fornecedores\n\n"
+                "Q: Posso remover um fornecedor usado por materiais existentes?\n"
+                "A: Sim, mas verifique dependências. O código remove do JSON de fornecedores, não altera registros no banco.\n\n"
+                "Q: Por que o valor aparece com vírgula?\n"
+                "A: A interface formata números para o padrão brasileiro (vírgula como separador decimal)."
+            )
+
+            # Função para mostrar seção
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            # Inicializa
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé: Fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            # Atalhos
+            modal.bind("<Escape>", lambda e: modal.destroy())
+
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Materiais):", e)   
+
     def _formatar_numero(self, entry_widget, casas=2):
         """
         Formata o conteúdo do entry_widget com 'casas' casas decimais

@@ -98,6 +98,40 @@ class SistemaNF(tk.Toplevel):
         search_button = tk.Button(search_frame, text="Buscar", command=self.buscar_nf)
         search_button.pack(side=tk.LEFT, padx=5)
 
+        # --- Botão Ajuda (mesmo estilo do Materiais) ---
+        self.help_frame = tk.Frame(search_frame, bg="#f4f4f4")
+        self.help_frame.pack(side="right", padx=(8, 12), pady=2)
+        self.botao_ajuda_saida = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_saida_modal()
+        )
+        self.botao_ajuda_saida.bind("<Enter>", lambda e: self.botao_ajuda_saida.config(bg="#3b5566"))
+        self.botao_ajuda_saida.bind("<Leave>", lambda e: self.botao_ajuda_saida.config(bg="#2c3e50"))
+        self.botao_ajuda_saida.pack(side="right", padx=(4, 6), pady=4)
+
+        # Tooltip (se desejar hover)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_saida, "Ajuda — Saída NF (F1)")
+        except Exception:
+            pass
+
+        # Atalho F1 para abrir a ajuda (aplica ao Toplevel)
+        try:
+            self.bind_all("<F1>", lambda e: self._abrir_ajuda_saida_modal())
+        except Exception:
+            try:
+                self.bind("<F1>", lambda e: self._abrir_ajuda_saida_modal())
+            except Exception:
+                pass
+
         # Novos botões para exportação
         tk.Button(search_frame, text="Excel", command=self.abrir_dialogo_exportacao, width=8).pack(side=tk.LEFT, padx=5, anchor="w")
 
@@ -256,6 +290,315 @@ class SistemaNF(tk.Toplevel):
 
         # Atualiza o campo de entrada com a data formatada
         self.data_var.set(data)
+
+    def _create_tooltip(self, widget, text, delay=450):
+        """Tooltip com quebra de linha automática e ajuste para não sair da tela."""
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            # cria janela do tooltip
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            # label com wrap para quebrar linhas
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=300  # máx. largura do tooltip (pixels)
+            )
+            label.pack()
+
+            # calcula posição inicial
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            # força update para medir o tamanho real
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # limites da tela
+            screen_w = win.winfo_screenwidth()
+            screen_h = win.winfo_screenheight()
+
+            # ajusta posição horizontal se ultrapassar borda direita
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 0:
+                x = 10
+
+            # ajusta posição vertical se ultrapassar borda inferior
+            if y + h > screen_h:
+                y = widget.winfo_rooty() - h - 6  # mostra acima do widget
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_saida_modal(self, contexto=None):
+        """Modal de Ajuda para Saída NF — instruções passo a passo (versão estendida).
+        Painel 'Adicionar NF' tem scrollbar dedicada (layout com grid + tkraise)."""
+        try:
+            modal = tk.Toplevel(self)
+            modal.title("Ajuda — Saída de Notas Fiscais")
+            modal.transient(self)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização simples
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (se aplicável)
+            try:
+                aplicar_icone(modal, self.caminho_icone)
+            except Exception:
+                pass
+
+            # Cabeçalho do modal
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Saída de Notas Fiscais", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: navegação à esquerda + conteúdo à direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Adicionar NF",
+                "Editar NF",
+                "Excluir NF",
+                "Adicionar Produto",
+                "Editar Produto",
+                "Excluir Produto",
+                "Exportar Excel",
+                "Pesquisa",
+                "Botão Limpar",
+                "Somar Pesos / Seleção Múltipla",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            # --- Content area (usa grid + tkraise para estabilidade) ---
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+            content_frame.rowconfigure(0, weight=1)
+            content_frame.columnconfigure(0, weight=1)
+
+            # Painel geral (usado pela maioria das seções)
+            general_frame = tk.Frame(content_frame, bg="white")
+            general_frame.grid(row=0, column=0, sticky="nsew")
+            general_frame.rowconfigure(0, weight=1)
+            general_frame.columnconfigure(0, weight=1)
+
+            txt_general = tk.Text(general_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_general = tk.Scrollbar(general_frame, command=txt_general.yview)
+            txt_general.configure(yscrollcommand=sb_general.set)
+            txt_general.grid(row=0, column=0, sticky="nsew")
+            sb_general.grid(row=0, column=1, sticky="ns")
+
+            # Painel específico para 'Adicionar NF' (com barra de rolagem dedicada)
+            adicionar_frame = tk.Frame(content_frame, bg="white")
+            adicionar_frame.grid(row=0, column=0, sticky="nsew")  # mesmo lugar do general_frame
+            adicionar_frame.rowconfigure(0, weight=1)
+            adicionar_frame.columnconfigure(0, weight=1)
+
+            txt_adicionar = tk.Text(adicionar_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_adicionar = tk.Scrollbar(adicionar_frame, command=txt_adicionar.yview)
+            txt_adicionar.configure(yscrollcommand=sb_adicionar.set)
+            txt_adicionar.grid(row=0, column=0, sticky="nsew")
+            sb_adicionar.grid(row=0, column=1, sticky="ns")
+
+            # Conteúdos (strings) com dicas de formatação incluídas
+            contents = {}
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "Tela de Saída de NF: registre notas fiscais e seus produtos (nome, peso e base do produto). "
+                "A Treeview mostra cada produto em sua própria linha. Use os botões para salvar, alterar, excluir e limpar.\n\n"
+                "Fluxo típico: adicione produtos → verifique a soma dos pesos → salve a NF (persistência no banco)."
+            )
+
+            contents["Adicionar NF"] = (
+                "Adicionar NF — Passo a passo\n\n"
+                "1) Preencha Data, número da NF, Cliente, CNPJ/CPF e (opcionalmente) Observação.\n"
+                "   - Data: não é necessário digitar as barras. Ex.: '01012025' será formatado automaticamente como '01/01/2025'.\n"
+                "   - CNPJ/CPF: não precisa inserir pontos, traços ou barras. Digite apenas os dígitos (ex.: '12345678909') e o sistema formatará automaticamente.\n"
+                "     Se o CPF ou CNPJ já existir no banco, o campo Cliente será preenchido automaticamente com os dados cadastrados. Se não existir, você pode digitar o nome normalmente.\n\n"
+                "2) Na seção 'Adicionar Produtos', selecione/insira Produto, informe Peso e escolha Base Produto.\n"
+                "   - Peso: não é preciso digitar vírgulas. Ex.: '12345' será formatado para '123,45' pelo formatador automático.\n\n"
+                "3) Clique em 'Adicionar Produto' para inserir o produto na lista temporária da NF. "
+                "Você pode repetir esse passo quantas vezes forem necessárias: **mais de um produto pode ser adicionado à mesma NF** — "
+                "cada produto virará uma linha na lista/Treeview vinculada ao mesmo número de NF.\n\n"
+                "4) Quando terminar de adicionar os produtos desejados, clique em 'Salvar NF' para gravar a nota e todos os seus produtos no banco.\n\n"
+                "Observação sobre Base Produto:\n"
+                " - Se precisar de uma base de produto que ainda não existe no menu suspenso, abra a janela 'Base Produto' (menu correspondente) e adicione o novo produto/base. "
+                "Ao voltar à tela de Saída de NF, o item recém-criado aparecerá na lista suspensa de Base Produto.\n\n"
+                "Dicas rápidas de formatação (Data / CNPJ/CPF / Peso):\n"
+                " - Data: você pode digitar somente os números; o sistema formata para DD/MM/AAAA automaticamente.\n"
+                " - CNPJ/CPF: digite apenas os dígitos (sem pontos, barras ou traços); se o cliente já estiver cadastrado, o nome será preenchido automaticamente.\n"
+                " - Peso: digite somente números (ex.: '2500') e o campo será formatado para '25,00'. Você também pode digitar com vírgula ('25,00') se preferir.\n"
+            )
+
+            contents["Editar NF"] = (
+                "Editar NF — Passo a passo\n\n"
+                "1) Selecione a linha (um produto/registro) na Treeview; os campos serão preenchidos com os dados da NF e do produto.\n"
+                "2) Altere os campos necessários (Data, Cliente, Produto, Peso, Base) e clique em 'Alterar NF' para aplicar as mudanças.\n\n"
+                "3) Confirmadas as alterações, o sistema atualiza tanto a tabela de NF quanto a tabela de produtos vinculados (UPDATE no banco)."
+            )
+
+            contents["Excluir NF"] = (
+                "Excluir NF — Passo a passo\n\n"
+                "1) Selecione uma ou mais linhas na Treeview (cada linha representa um produto dentro da NF).\n"
+                "2) Clique em 'Excluir NF' — será solicitada confirmação que a NF e os produtos associados serão removidos.\n"
+                "3) Confirme para executar o DELETE no banco; a Treeview será atualizada."
+            )
+
+            contents["Adicionar Produto"] = (
+                "Adicionar Produto — Passo a passo\n\n"
+                "1) Preencha o campo Produto, informe o Peso e selecione a Base Produto.\n"
+                "   - Peso: não é necessário digitar a vírgula decimal. Digite apenas números (ex.: '2500') e o sistema formatará para '25,00' conforme o formatador automático.\n"
+                "2) Use vírgula para decimais se preferir, o campo também aceita (ex.: '25,00').\n"
+                "3) Clique em 'Adicionar Produto' — o item entra na lista temporária (self.produtos) associado à NF corrente."
+            )
+
+            contents["Editar Produto"] = (
+                "Editar Produto — Passo a passo\n\n"
+                "1) Selecione o produto na lista/Treeview e clique em 'Alterar Produto' (ou edite os campos e salve).\n"
+                "2) Confirme as mudanças — o item será atualizado na lista temporária ou no banco, dependendo do estado atual (salvo/não salvo)."
+            )
+
+            contents["Excluir Produto"] = (
+                "Excluir Produto — Passo a passo\n\n"
+                "1) Selecione um produto na lista temporária/Listbox e clique em 'Excluir Produto'.\n"
+                "2) Confirme a exclusão; o produto é removido da lista temporária (ou do banco se já estiver salvo)."
+            )
+
+            contents["Exportar Excel"] = (
+                "Exportar Excel — como usar\n\n"
+                "1) Clique em 'Excel' na barra superior → escolha filtros (intervalo de datas, NF, cliente, produto, base).\n"
+                "2) Escolha local/nome do arquivo e a tela exporta as colunas Data, NF, Produto, Peso, Cliente, CNPJ/CPF, Base Produto e Observação."
+            )
+
+            contents["Pesquisa"] = (
+                "Pesquisa — dicas\n\n"
+                " - Você pode pesquisar por Data (ddmmyyyy → dd/mm/aaaa), NF, Cliente, CNPJ/CPF, Produto ou Base.\n"
+                " - Pressione Enter ou clique em Buscar após digitar o termo. O campo pode autoformatar datas e CNPJs."
+            )
+
+            contents["Botão Limpar"] = (
+                "Botão Limpar — comportamento\n\n"
+                " - 'Limpar' zera todos os campos da tela, limpa a lista temporária de produtos e restaura a Treeview sem filtros.\n"
+                " - Não altera registros já salvos no banco — serve apenas para limpar a interface para novo cadastro."
+            )
+
+            contents["Somar Pesos / Seleção Múltipla"] = (
+                "Somar Pesos — como funciona e seleção múltipla\n\n"
+                " - Para somar o peso de várias linhas, use a seleção múltipla na Treeview e observe o campo 'Soma dos Pesos' (ou indicação similar na interface).\n"
+                " - Teclas e atalhos para selecionar múltiplas linhas:\n"
+                "    • Windows/Linux: segure **Ctrl** e clique em linhas diferentes para selecionar várias linhas não contíguas.\n"
+                "    • Windows/Linux: clique na primeira linha, segure **Shift** e clique na última linha para selecionar um intervalo contíguo.\n"
+                "    • macOS: segure **Command (⌘)** para seleção não contígua; use **Shift** para selecionar intervalos contíguos.\n"
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Saída NF\n\n"
+                "Q: Posso adicionar vários produtos antes de salvar?\n"
+                "A: Sim — use 'Adicionar Produto' repetidamente; os produtos ficam em self.produtos até 'Salvar NF'.\n\n"
+                "Q: Criei uma Base Produto e não apareceu na lista suspensa — o que faço?\n"
+                "A: Verifique se salvou a base na janela 'Base Produto'; em alguns casos é necessário reabrir a tela de Saída NF para recarregar as opções."
+            )
+
+            # função que mostra a seção correta (usa tkraise para alternar painéis)
+            def mostrar_secao(key):
+                if key == "Adicionar NF":
+                    txt_adicionar.configure(state="normal")
+                    txt_adicionar.delete("1.0", "end")
+                    txt_adicionar.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_adicionar.configure(state="disabled")
+                    txt_adicionar.yview_moveto(0)
+                    adicionar_frame.tkraise()
+                else:
+                    txt_general.configure(state="normal")
+                    txt_general.delete("1.0", "end")
+                    txt_general.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_general.configure(state="disabled")
+                    txt_general.yview_moveto(0)
+                    general_frame.tkraise()
+
+            # Inicializa exibindo a primeira seção
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé e Fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            modal.bind("<Escape>", lambda e: modal.destroy())
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Saida NF):", e)
 
     def mostrar_observacao(self, event):
         """Exibe e permite a edição da observação completa em uma janela pop-up."""

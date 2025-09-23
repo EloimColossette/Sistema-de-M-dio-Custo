@@ -129,6 +129,44 @@ class CalculoProduto:
         # Frame para os botões
         self.frame_botoes = ttk.Frame(self.root)
         self.frame_botoes.pack(padx=15, fill="x")
+
+        # --- Botão de ajuda (correção: sem cget("background") no ttk.Frame) ---
+        self.help_frame = tk.Frame(self.frame_top)   # sem bg = self.frame_top.cget("background")
+        self.help_frame.pack(side="right", padx=(8, 12), pady=2)
+
+        self.botao_ajuda_calculo = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_calculo_modal()
+        )
+        self.botao_ajuda_calculo.bind("<Enter>", lambda e: self.botao_ajuda_calculo.config(bg="#3b5566"))
+        self.botao_ajuda_calculo.bind("<Leave>", lambda e: self.botao_ajuda_calculo.config(bg="#2c3e50"))
+        self.botao_ajuda_calculo.pack(side="right", padx=(4, 6), pady=4)
+
+        # tooltip resumido (mostra pequeno texto no hover)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_calculo,
+                    "Ajuda — Cálculo de NFs: F1",
+                    max_width=380
+                )
+        except Exception:
+            pass
+
+        # também registra atalho F1 para abrir a ajuda (bind no Toplevel usado pela classe)
+        try:
+            self.root.bind_all("<F1>", lambda e: self._abrir_ajuda_calculo_modal())
+        except Exception:
+            try:
+                self.root.bind("<F1>", lambda e: self._abrir_ajuda_calculo_modal())
+            except Exception:
+                pass
     
         # Frame para o Treeview e barras de rolagem
         self.frame_tree = ttk.Frame(self.root)
@@ -342,6 +380,283 @@ class CalculoProduto:
         conn.commit()
         cursor.close()
         conn.close()
+
+    def _create_tooltip(self, widget, text, delay=450, max_width=None):
+        """
+        Tooltip melhorado: quebra de linha e evita sair da tela.
+        Use: self._create_tooltip(widget, 'texto longo...')
+        """
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            # decide wraplength conforme a largura da tela
+            if max_width:
+                wrap_len = max(120, min(max_width, screen_w - 80))
+            else:
+                wrap_len = min(360, max(200, screen_w - 160))
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(win, text=text, bg="#333333", fg="white",
+                            font=("Segoe UI", 9), bd=0, padx=6, pady=4, wraplength=wrap_len)
+            label.pack()
+
+            # posição inicial: abaixo do widget, centrado
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajusta horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # tenta posicionar abaixo; se não couber, posiciona acima
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_calculo_modal(self, contexto=None):
+        """Modal de Ajuda — Cálculo de NFs: explica produto, peso, operação, calcular, atualizar manual, histórico, pesquisa e export."""
+        try:
+            modal = tk.Toplevel(self.root)
+            modal.title("Ajuda — Cálculo de NFs")
+            modal.transient(self.root)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # centraliza
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # ícone (opcional)
+            try:
+                aplicar_icone(modal, "C:\\Sistema\\logos\\Kametal.ico")
+            except Exception:
+                pass
+
+            # cabeçalho
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Cálculo de NFs", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # corpo (nav esquerda + conteúdo direita)
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10,6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Produto (lista suspensa)",
+                "Peso (entrada)",
+                "Operação (Adicionar/Subtrair)",
+                "Botão Calcular (Comportamento)",
+                "Atualizar Custo Manual",
+                "Histórico de Cálculo",
+                "Exportação do Histórico",
+                "Pesquisa no Histórico",
+                "Exportar Excel",
+                "Barra de Pesquisa na Tela",
+                "FAQ"
+            ]
+
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False, bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0,10))
+
+            # area de conteúdo (text + scrollbar)
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # textos por seção
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "Esta tela permite ajustar manualmente o estoque com base nas NFs de entrada e acompanhar o histórico dessas alterações. "
+                "Use os controles acima (produto, valor do peso e operação) para executar alterações rápidas; use 'Atualizar Custo Manual' "
+                "para corrigir o custo de uma NF específica.\n"
+            )
+
+            contents["Produto (lista suspensa)"] = (
+                "Produto — lista suspensa\n\n"
+                " • A lista de produtos presente na combobox vem das NFs registradas (Entrada_NF). Ela lista todos os produtos já cadastrados nas entradas.\n"
+                " • Você pode digitar parte do nome para filtrar; o sistema sugere itens existentes.\n"
+                " • Se um produto novo for cadastrado na Entrada_NF/Base, reabra a tela ou atualize a lista (recarregar) para vê-lo na combobox.\n"
+            )
+
+            contents["Peso (entrada)"] = (
+                "Peso — como informar\n\n"
+                " • No campo de peso (entrada_valor) NÃO é necessário digitar a vírgula decimal — digite apenas dígitos e o sistema formatará automaticamente.\n"
+                "   Ex.: digitar '2500' resultará em '25,00' (dependendo da formatação usada pela sua aplicação).\n"
+                " • Use a caixa de seleção de operação (Adicionar/Subtrair) para informar se o valor será somado ao estoque ou subtraído dele.\n"
+            )
+
+            contents["Operação (Adicionar/Subtrair)"] = (
+                "Operação — o que acontece\n\n"
+                " • 'Subtrair': o sistema irá buscar as NFs mais antigas (FIFO) e subtrair a quantidade informada delas, respeitando o estoque disponível em cada NF.\n"
+                "   Se o valor informado for maior que o disponível na NF atual, o sistema continuará buscando nas próximas NFs (ordem por data/número).\n\n"
+                " • 'Adicionar': o sistema procura NFs mais recentes e tenta adicionar o valor informado nelas (até que o peso líquido da NF seja atingido). "
+                "Se não houver espaço suficiente em NFs existentes, o sistema avisará sobre o restante que não pôde ser alocado.\n"
+            )
+
+            contents["Botão Calcular (Comportamento)"] = (
+                "Botão Calcular — passo a passo\n\n"
+                "1) Preencha Produto, Peso e selecione a Operação.\n"
+                "2) Clique em 'Calcular'.\n"
+                "   - Se for Subtrair: o sistema varre NFs (das mais antigas) subtraindo até consumir o valor informado.\n"
+                "   - Se for Adicionar: o sistema varre NFs (das mais recentes) adicionando até preencher o peso líquido de cada NF.\n"
+                "3) O sistema atualiza a coluna 'Qtd Estoque' das NFs alteradas e aplica as tags visuais:\n"
+                "   • Amarelo: linha está em uso (estoque parcialmente utilizado)\n"
+                "   • Vermelho: estoque da NF está zerado\n"
+                "   • Preto: NF não foi alterada; estoque está igual ao peso líquido\n"
+                "\nObservação técnica:\n"
+                " • O processo tenta preservar consistência: se o valor informado ultrapassar o total disponível (no caso de subtração), o usuário recebe erro.\n"
+                " • Para adicionar, o sistema tenta distribuir o valor até completar o peso_liquido das NFs (se houver espaço).\n"
+            )
+
+            contents["Atualizar Custo Manual"] = (
+                "Atualizar Custo Manual — quando usar\n\n"
+                " • Use este botão quando uma NF estiver com custo incorreto e você precisar corrigir manualmente o 'Custo Total Manual'.\n"
+                " • Fluxo: selecione a linha (a NF específica) na Treeview, clique 'Atualizar Custo Manual', insira o valor correto e confirme. "
+                "O valor será gravado na tabela e priorizado nos cálculos de custo.\n"
+            )
+
+            contents["Histórico de Cálculo"] = (
+                "Histórico de Cálculo — o que é registrado\n\n"
+                " • O histórico registra: usuário que executou a operação, NF de onde foi subtraído ou adicionou, produto, quantidade alterada, "
+                "tipo de operação (adicionar/subtrair) e data/hora.\n"
+                " • Cada ação (Calcular / Atualizar Custo Manual) que modifica estoque gera uma entrada no histórico.\n"
+                " • Serve para auditoria e rastreabilidade das mudanças de estoque.\n"
+            )
+
+            contents["Exportação do Histórico"] = (
+                "Exportação do Histórico — instruções\n\n"
+                " • 'Exportar Visível': exporta apenas as linhas atualmente visíveis no histórico, com filtros e pesquisa aplicados.\n"
+                " • 'Exportar Tudo': exporta todo o histórico do banco, independentemente dos filtros aplicados.\n"
+                " • As exportações geram arquivos .xlsx com colunas: Usuário, NF, Produto, Quantidade, Operação, Data/Hora.\n"
+                " • Recomenda-se exportar antes da purga mensal para manter registros de meses anteriores.\n"
+            )
+
+            contents["Pesquisa no Histórico"] = (
+                "Pesquisa no Histórico — como usar\n\n"
+                " • Use os filtros do histórico (produto, termo de busca) para localizar operações específicas.\n"
+                " • É possível buscar por usuário, número da NF, produto, operação (adicionar/subtrair) ou parte do texto.\n"
+                " • O resultado mostra as entradas ordenadas por data/hora (mais recentes primeiro)."
+            )
+
+            contents["Exportar Excel"] = (
+                "Exportar Excel — como funciona\n\n"
+                " • A exportação gera um arquivo .xlsx contendo as colunas visíveis (Data, NF, Produto, Quantidade, Operação, Usuário, etc.).\n"
+                " • Antes de exportar, aplique os filtros desejados (data, produto) para reduzir o volume.\n"
+            )
+
+            contents["Barra de Pesquisa na Tela"] = (
+                "Barra de Pesquisa (tela principal) — explicação\n\n"
+                " • A barra de pesquisa filtra a Treeview principal por Data (formato dd/mm/aaaa), NF, Produto ou parte do nome.\n"
+                " • Pressione Enter para executar a busca; 'Limpar' restaura a visão completa.\n"
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Perguntas rápidas\n\n"
+                "Q: Posso digitar o peso com vírgula? \nA: Sim, mas não é necessário — o campo aceita apenas dígitos e faz a formatação.\n\n"
+                "Q: O que acontece se eu adicionar mais do que o espaço disponível? \nA: O sistema tentará preencher NFs existentes; se não houver espaço, resta um valor não alocado e uma mensagem de aviso é exibida.\n\n"
+                "Q: Quem aparece no histórico? \nA: O usuário obtido de `menu.user_name` (se disponível) ou o usuário do sistema (getpass.getuser())."
+            )
+
+            # função para mostrar seção
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # rodapé com fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            modal.bind("<Escape>", lambda e: modal.destroy())
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Cálculo de NFs):", e)
 
     def formatar_valor(self, valor, casas_decimais=2):
         return f"{valor:,.{casas_decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")

@@ -12,34 +12,44 @@ from centralizacao_tela import centralizar_janela
 import threading
 
 class Janela_InsercaoNF(tk.Toplevel):
-    # Arrumar a largura do treeview
     def __init__(self, parent, janela_menu):
         super().__init__()
         # Configuração inicial da janela
-        self.resizable(True, True)  # Permite redimensionamento
-        self.geometry("900x500")  # Define o tamanho inicial
-        self.state("normal")  # Garante o estado inicial como "normal"
+        self.resizable(True, True)
+        self.geometry("900x500")
+        self.state("normal")
 
-        self.janela_menu = janela_menu  # Armazena a referência da janela do menu
+        self.janela_menu = janela_menu
         self.parent = parent
-        self.title("Entrada de Nfs")
-        self.state("zoomed")  # Se precisar que abra maximizada, pode manter após configurar tudo
+        self.title("Entrada de NFs")
+        self.state("zoomed")
 
+        # caminho do ícone (mantive seu valor)
         self.caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
-        aplicar_icone(self, self.caminho_icone)
+        try:
+            aplicar_icone(self, self.caminho_icone)
+        except Exception:
+            pass
 
-        # Resetar estilos para evitar herança de outras janelas
-        style = ttk.Style(self)
-        style.theme_use("alt")  # Define o tema padrão
-        style.configure(".", font=("Arial", 10))  # Fonte padrão para todos os widgets
-        style.configure("Treeview", rowheight=25)  # Altura das linhas no Treeview
-        style.configure("Treeview.Heading", font=("Courier", 10, "bold"))  # Cabeçalhos do Treeview
+        # Estilos
+        estilo = ttk.Style(self)
+        try:
+            estilo.theme_use("alt")
+        except Exception:
+            pass
+        estilo.configure(".", font=("Arial", 10))
+        estilo.configure("Treeview", rowheight=25)
+        estilo.configure("Treeview.Heading", font=("Courier", 10, "bold"))
 
-        # Configuração do banco de dados usando a biblioteca conectar
-        self.conn = conectar()
-        self.cursor = self.conn.cursor()
+        # DB (tente conectar; se falhar, mantenha None para não travar)
+        try:
+            self.conn = conectar()
+            self.cursor = self.conn.cursor()
+        except Exception:
+            self.conn = None
+            self.cursor = None
 
-        # Mapeamento de colunas do banco de dados para nomes amigáveis
+        # Mapeamento de colunas e ordem (mantive seu mapeamento)
         self.colunas_fixas = {
             "data": "Data",
             "nf": "NF",
@@ -51,7 +61,7 @@ class Janela_InsercaoNF(tk.Toplevel):
             "material_5": "Material 5",
             "produto": "Produto",
             "custo_empresa": "Custo Empresa",
-            "ipi": "IPI", 
+            "ipi": "IPI",
             "valor_integral": "Valor Integral",
             "valor_unitario_1": "Valor Unitário 1",
             "valor_unitario_2": "Valor Unitário 2",
@@ -64,42 +74,47 @@ class Janela_InsercaoNF(tk.Toplevel):
             "duplicata_4": "Duplicata 4",
             "duplicata_5": "Duplicata 5",
             "duplicata_6": "Duplicata 6",
-            "valor_unitario_energia": "Valor Unitário Energia",  
+            "valor_unitario_energia": "Valor Unitário Energia",
             "valor_mao_obra_tm_metallica": "Valor Mão de Obra TM/Metallica",
             "peso_liquido": "Peso Líquido",
-            "peso_integral": "Peso Integral" 
+            "peso_integral": "Peso Integral"
         }
 
         self.ordem_colunas = [
             "data", "nf", "fornecedor",
             "material_1", "material_2", "material_3", "material_4", "material_5",
-            "produto", "custo_empresa", "ipi", "valor_integral",  # Adicionando IPI após Custo empresa
+            "produto", "custo_empresa", "ipi", "valor_integral",
             "valor_unitario_1", "valor_unitario_2", "valor_unitario_3",
             "valor_unitario_4", "valor_unitario_5",
             "duplicata_1", "duplicata_2", "duplicata_3", "duplicata_4",
             "duplicata_5", "duplicata_6",
-            "valor_unitario_energia", "valor_mao_obra_tm_metallica",  # Adicionando Energia e Mão de obra
-            "peso_liquido", "peso_integral"  # Adicionando Quantidade Usada e Peso Integral
+            "valor_unitario_energia", "valor_mao_obra_tm_metallica",
+            "peso_liquido", "peso_integral"
         ]
 
-        # Definir as colunas que podem ser ocultadas
-        self.colunas_ocultaveis = ["material_1", "material_2", "material_3", "material_4", "material_5", "valor_unitario_1", "valor_unitario_2", "valor_unitario_3", "valor_unitario_4", "valor_unitario_5", "duplicata_1", "duplicata_2", "duplicata_3", "duplicata_4", "duplicata_5", "duplicata_6"]
+        self.colunas_ocultaveis = [
+            "material_1", "material_2", "material_3", "material_4", "material_5",
+            "valor_unitario_1", "valor_unitario_2", "valor_unitario_3", "valor_unitario_4", "valor_unitario_5",
+            "duplicata_1", "duplicata_2", "duplicata_3", "duplicata_4", "duplicata_5", "duplicata_6"
+        ]
 
-        # Inicializar colunas visíveis com todas as colunas
+        # visibilidade e larguras
         self.colunas_visiveis = list(self.colunas_fixas.keys())
-        self.colunas_ocultas = []  # Lista para armazenar colunas ocultas
-        self.larguras_colunas = {coluna: 120 for coluna in self.colunas_fixas.keys()}  # Defina uma largura padrão para todas as colunas
+        self.colunas_ocultas = []
+        self.larguras_colunas = {col: 120 for col in self.colunas_fixas.keys()}
 
-        # Criar o Treeview com colunas fixas
+        # Mapeamento reverso (rótulo -> chave)
+        self.display_to_key = {v: k for k, v in self.colunas_fixas.items()}
+
+        # Treeview
         self.tree = ttk.Treeview(self, columns=self.colunas_visiveis, show="headings")
         self.configurar_treeview()
 
-        # Adicionando barra de rolagem vertical
+        # Scrollbars
         scrollbar_y = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar_y.set)
         scrollbar_y.grid(row=0, column=4, sticky="ns")
 
-        # Adicionando barra de rolagem horizontal
         scrollbar_x = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(xscroll=scrollbar_x.set)
         scrollbar_x.grid(row=1, column=0, columnspan=4, sticky="ew")
@@ -108,7 +123,6 @@ class Janela_InsercaoNF(tk.Toplevel):
         self.frame_operacoes_linhas = tk.LabelFrame(self, text="Operações com Linhas")
         self.frame_operacoes_linhas.grid(row=3, column=0, columnspan=4, sticky="ew", padx=10, pady=5)
 
-        # Botões para operações com linhas
         self.btn_insert = tk.Button(self.frame_operacoes_linhas, text="Inserir Linha", command=self.inserir_linha)
         self.btn_insert.grid(row=0, column=0, padx=5, pady=5)
 
@@ -118,79 +132,413 @@ class Janela_InsercaoNF(tk.Toplevel):
         self.btn_remove_items = tk.Button(self.frame_operacoes_linhas, text="Excluir Itens", command=self.remove_selected_items)
         self.btn_remove_items.grid(row=0, column=2, padx=5, pady=5)
 
-        # Botão para calcular a média ponderada
         self.btn_media_ponderada = tk.Button(self.frame_operacoes_linhas, text="Calculadora de Média", command=self.chamar_calculadora_media_ponderada)
         self.btn_media_ponderada.grid(row=0, column=3, padx=5, pady=5)
 
-        # Crie uma StringVar e vincule-a ao Entry
+        # Campo de pesquisa com trace
         self.search_var = tk.StringVar()
-        # Adicione o trace para formatação em tempo real
         self.trace_id = self.search_var.trace_add("write", self.formatar_data_em_tempo_real)
 
         self.lbl_pesquisa = tk.Label(self.frame_operacoes_linhas, text="Buscar:")
         self.lbl_pesquisa.grid(row=0, column=4, padx=5, pady=5, sticky="e")
 
-        # Use a StringVar no textvariable do Entry
         self.entry_pesquisa = tk.Entry(self.frame_operacoes_linhas, width=50, textvariable=self.search_var)
         self.entry_pesquisa.grid(row=0, column=5, padx=5, pady=5, sticky="ew")
-
-        # Vincula o pressionamento da tecla Enter à função de pesquisa
         self.entry_pesquisa.bind("<Return>", lambda event: self.pesquisar())
 
         self.btn_pesquisar = tk.Button(self.frame_operacoes_linhas, text="Pesquisar", command=self.pesquisar)
         self.btn_pesquisar.grid(row=0, column=6, padx=5, pady=5)
 
-        # Ajustar as colunas para que a última coluna se expanda corretamente
         self.frame_operacoes_linhas.columnconfigure(4, weight=1)
 
-        # Configurar o layout da janela
+        # Layout principal
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
-        # Adicionando o Treeview à janela
         self.tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
 
-        # Frame para operações com colunas (ocultar e mostrar)
+        # Frame para operações com colunas (ocultar/mostrar)
         self.frame_operacoes_colunas = tk.LabelFrame(self, text="Exibir/Ocultar Colunas")
         self.frame_operacoes_colunas.grid(row=4, column=0, columnspan=4, sticky="ew", padx=10, pady=5)
 
-       # Combobox para selecionar colunas
         self.combobox_colunas = ttk.Combobox(
-            self.frame_operacoes_colunas, 
-            values=[self.colunas_fixas[coluna] for coluna in self.colunas_ocultaveis], 
+            self.frame_operacoes_colunas,
+            values=[self.colunas_fixas[c] for c in self.colunas_ocultaveis],
             state="readonly"
         )
         self.combobox_colunas.grid(row=0, column=0, padx=10, pady=5)
         self.combobox_colunas.set("Selecione uma coluna")
 
-        # Botões para ocultar e mostrar colunas
         self.btn_ocultar = tk.Button(self.frame_operacoes_colunas, text="Ocultar Coluna", command=self.ocultar_coluna_selecionada)
         self.btn_ocultar.grid(row=0, column=1, padx=5, pady=5)
 
         self.btn_mostrar = tk.Button(self.frame_operacoes_colunas, text="Mostrar Coluna", command=self.mostrar_coluna_selecionada)
         self.btn_mostrar.grid(row=0, column=2, padx=5, pady=5)
 
-        # Botão de Voltar
         self.btn_voltar = tk.Button(self.frame_operacoes_colunas, text="Voltar", command=self.voltar_para_menu)
         self.btn_voltar.grid(row=0, column=3, padx=5, pady=5)
 
-        # Coluna "espaçadora" para empurrar o botão Excel para a direita
         self.frame_operacoes_colunas.grid_columnconfigure(4, weight=1)
 
-        # Botão de Excel na coluna 5, fixado à direita
         self.btn_exportar = tk.Button(self.frame_operacoes_colunas, text="Exportação Excel", command=self.abrir_dialogo_exportacao)
         self.btn_exportar.grid(row=0, column=5, padx=5, pady=5, sticky="e")
 
+        # --- Botão Ajuda (colocado na frame_operacoes_colunas existente) ---
+        self.help_frame = tk.Frame(self.frame_operacoes_colunas, bg="#f4f4f4")
+        self.help_frame.grid(row=0, column=6, padx=(8, 12), pady=2, sticky="e")
+
+        self.botao_ajuda_estoque = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_estoque_modal()
+        )
+        self.botao_ajuda_estoque.pack(side="right", padx=(4, 6), pady=4)
+        self.botao_ajuda_estoque.bind("<Enter>", lambda e: self.botao_ajuda_estoque.config(bg="#3b5566"))
+        self.botao_ajuda_estoque.bind("<Leave>", lambda e: self.botao_ajuda_estoque.config(bg="#2c3e50"))
+
+        # Tooltip seguro (se definir _create_tooltip)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_estoque,
+                                     "Ajuda — Estoque: F1 ")
+        except Exception:
+            pass
+
+        # Atalho F1 -> abre modal (bind no próprio Toplevel)
+        try:
+            self.bind_all("<F1>", lambda e: self._abrir_ajuda_estoque_modal())
+        except Exception:
+            pass
+
         self.dados_colunas_ocultas = {}
 
-        # Carregar dados do banco de dados
+        # Carregamentos iniciais
         self.carregar_dados()
-
-        # Carregar estado das colunas
         self.carregar_estado_colunas()
 
-        # Configurar o comportamento ao fechar a janela
+        # Fechamento
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def _create_tooltip(self, widget, text, delay=450, max_width=None):
+        """
+        Tooltip melhorado: quebra automática de linhas e ajuste para não sair da tela.
+        - widget: widget alvo
+        - text: texto do tooltip
+        - delay: ms até exibir
+        - max_width: largura máxima do tooltip em pixels (opcional)
+        """
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            # determina wraplength
+            if max_width:
+                wrap_len = max(120, min(max_width, screen_w - 80))
+            else:
+                wrap_len = min(360, max(200, screen_w - 160))
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial: centrado horizontalmente sobre o widget, abaixo dele
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajuste horizontal
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajuste vertical: tenta abaixo; se não couber, mostra acima; senão limita
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_estoque_modal(self, contexto=None):
+        """Modal de Ajuda para Entrada de NF / Estoque — instruções estendidas.
+        Inclui explicação de campos (formatação automática, onde cadastrar novos itens, etc.)
+        concentrados na seção 'Adicionar NF'."""
+        try:
+            modal = tk.Toplevel(self)
+            modal.title("Ajuda — Entrada de NF / Estoque")
+            modal.transient(self)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (se aplicável)
+            try:
+                aplicar_icone(modal, self.caminho_icone)
+            except Exception:
+                pass
+
+            # Cabeçalho
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Entrada de Notas Fiscais (Estoque)", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=300, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Adicionar NF",
+                "Editar NF",
+                "Excluir NF",
+                "Calculadora: Média Ponderada",
+                "Pesquisa",
+                "Colunas Dinâmicas (Ocultar / Mostrar)",
+                "Exportar Excel",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            # Área de conteúdo
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+            content_frame.rowconfigure(0, weight=1)
+            content_frame.columnconfigure(0, weight=1)
+
+            # Painel geral
+            general_frame = tk.Frame(content_frame, bg="white")
+            general_frame.grid(row=0, column=0, sticky="nsew")
+            general_frame.rowconfigure(0, weight=1)
+            general_frame.columnconfigure(0, weight=1)
+
+            txt_general = tk.Text(general_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_general = tk.Scrollbar(general_frame, command=txt_general.yview)
+            txt_general.configure(yscrollcommand=sb_general.set)
+            txt_general.grid(row=0, column=0, sticky="nsew")
+            sb_general.grid(row=0, column=1, sticky="ns")
+
+            # Painel específico para "Adicionar NF"
+            adicionar_frame = tk.Frame(content_frame, bg="white")
+            adicionar_frame.grid(row=0, column=0, sticky="nsew")
+            adicionar_frame.rowconfigure(0, weight=1)
+            adicionar_frame.columnconfigure(0, weight=1)
+
+            txt_adicionar = tk.Text(adicionar_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_adicionar = tk.Scrollbar(adicionar_frame, command=txt_adicionar.yview)
+            txt_adicionar.configure(yscrollcommand=sb_adicionar.set)
+            txt_adicionar.grid(row=0, column=0, sticky="nsew")
+            sb_adicionar.grid(row=0, column=1, sticky="ns")
+
+            # Conteúdos
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "Esta janela é destinada à **Entrada de produto vindo do fornecedor** — ou seja, registrar o que entrou em estoque "
+                "a partir de uma Nota Fiscal (NF). Esta tela NÃO realiza cálculos de custo aqui: as informações principais já vêm "
+                "na própria NF (produto, peso, base, fornecedor, etc.).\n\n"
+                "Fluxo típico: abrir Nova Entrada → informar dados da NF (data, número, fornecedor) → adicionar os produtos conforme a NF → salvar.\n\n"
+                "Observação: toda regra de custo/calculo (se existir) é tratada em outros módulos; aqui gravamos a entrada conforme a NF."
+            )
+
+            contents["Adicionar NF"] = (
+                "Adicionar NF — instruções completas\n\n"
+                "1) Campos principais e formatação automática\n"
+                "   - Data: não é necessário digitar as barras. Ex.: '01012025' será automaticamente formatado como '01/01/2025'.\n"
+                "   - Campos numéricos: não é necessário digitar a vírgula. Basta digitar os números que o sistema formata sozinho. "
+                "Ex.: '2500' vira '25,00'.\n"
+                "     Isso vale para os seguintes campos:\n"
+                "       • custo da empresa\n"
+                "       • IPI\n"
+                "       • valor integral\n"
+                "       • valor unitário 1 a 5\n"
+                "       • duplicata 1 a 6\n"
+                "       • valor unitário energia\n"
+                "       • valor mão de obra TM/Metallica\n"
+                "       • peso líquido\n"
+                "       • peso integral\n"
+                "   - Na calculadora (Peso / Valor) também não é necessário digitar a vírgula: o sistema faz a formatação automática.\n\n"
+                "2) Materiais / Produtos / Fornecedor — onde cadastrar novos itens\n"
+                "   - Caso queira que as entradas de Materiais, Produto ou Fornecedor tenham novos registros, abra a janela 'Materiais'. "
+                "Lá você pode cadastrar fornecedores e materiais novos que aparecerão automaticamente nas listas suspensas desta tela.\n"
+                "   - Se quiser cadastrar produtos novos, utilize a janela 'Base' (cadastro de produtos/base). Após salvar, o item aparecerá na lista suspensa de produtos.\n\n"
+                "3) Adicionar vários produtos na mesma NF\n"
+                "   - Na seção de 'Adicionar Produto', selecione o produto/base e informe o Peso.\n"
+                "   - Clique em 'Adicionar Produto' para inserir na lista temporária da NF.\n"
+                "   - Repita quantas vezes forem necessárias: cada produto se tornará uma linha na Treeview, todos vinculados ao mesmo número de NF.\n\n"
+                "4) Salvar NF\n"
+                "   - Depois de adicionar todos os produtos da nota, clique em 'Salvar NF' para gravar a nota e os itens no banco de dados.\n\n"
+                "Dica: Se um item cadastrado recentemente (fornecedor, material ou produto) não aparecer na lista, feche e reabra a tela de Entrada para recarregar as opções."
+            )
+
+            contents["Editar NF"] = (
+                "Editar NF — instruções\n\n"
+                " • Selecione a linha (registro) correspondente à NF/produto que deseja editar. Os campos serão carregados para edição.\n"
+                " • Altere somente os campos necessários (por exemplo: quantidade, base do produto, descrições) e confirme para atualizar os registros no banco.\n"
+                " • Esta janela trata da entrada física conforme a NF; recursos específicos de observação/alerta (como linhas em vermelho) pertencem a outras telas (ex.: Saída NF).\n"
+            )
+
+            contents["Excluir NF"] = (
+                "Excluir NF — instruções\n\n"
+                " • Selecione uma ou mais linhas da NF que deseja remover e clique em 'Excluir'. Você será solicitado a confirmar a operação.\n"
+                " • A exclusão remove o registro da entrada (ou marca como cancelada, dependendo da implementação que você escolher) — tome cuidado para não perder dados importantes."
+            )
+
+            contents["Calculadora: Média Ponderada"] = (
+                "Calculadora — Média Ponderada (quando usar)\n\n"
+                " • Use a média ponderada somente quando **a mesma NF contém mais de uma ocorrência do mesmo material** com preços diferentes.\n"
+                " • Procedimento: selecione as linhas que representam o mesmo material dentro da NF e aplique a média ponderada — o sistema calculará\n"
+                "   o custo médio considerando peso/quantidade como fator de ponderação.\n"
+                " • Em entradas simples (um único registro por material) não é necessário utilizar essa calculadora."
+                " • Nas entradas da calculadora (Peso e Valor) digite apenas dígitos: o campo formata a vírgula automaticamente."
+            )
+
+            contents["Pesquisa"] = (
+                "Pesquisa — dicas de uso\n\n"
+                " • Pesquise por Data (dd/mm/aaaa), NF, Fornecedor ou Produto.\n"
+                " • Para conjuntos muito grandes, combine filtros (por exemplo data + fornecedor) para reduzir os resultados.\n"
+                " • Use o botão 'Limpar' para restabelecer a visão completa."
+            )
+
+            contents["Colunas Dinâmicas (Ocultar / Mostrar)"] = (
+                "Colunas Dinâmicas — ocultar e mostrar\n\n"
+                " • Quando uma NF possui muitos materiais diferentes (ou se houver muitas colunas geradas por diferentes materiais),\n"
+                "   a visualização pode ficar poluída. Utilize a funcionalidade de ocultar/mostrar colunas para exibir apenas o que interessa.\n"
+                " • Recomenda-se ocultar colunas de materiais pouco relevantes durante análises rápidas e restaurá-las quando precisar de detalhes."
+            )
+
+            contents["Exportar Excel"] = (
+                "Exportar Excel — como usar\n\n"
+                " • Clique em 'Exportação Excel', filtre o conjunto desejado (por data, NF, fornecedor, produto) e escolha onde salvar o arquivo (.xlsx).\n"
+                " • O sistema exportará apenas as colunas visíveis e os registros filtrados — aplique filtros e ajuste colunas antes de exportar para um relatório mais enxuto."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Rápido\n\n"
+                "Q: Cadastrei um material e ele não apareceu na lista suspensa?\n"
+                "A: Confirme se salvou o material na janela 'Materiais' e, se necessário, reabra a tela ou recarregue os dados nesta janela para atualizar as comboboxes.\n\n"
+                "Q: Esta tela faz cálculos de custo automático?\n"
+                "A: Não — esta tela registra a entrada conforme a NF. Qualquer cálculo de custo é feito em módulos específicos, quando aplicável."
+            )
+
+            # função que mostra a seção
+            def mostrar_secao(key):
+                if key == "Adicionar NF":
+                    txt_adicionar.configure(state="normal")
+                    txt_adicionar.delete("1.0", "end")
+                    txt_adicionar.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_adicionar.configure(state="disabled")
+                    txt_adicionar.yview_moveto(0)
+                    adicionar_frame.tkraise()
+                else:
+                    txt_general.configure(state="normal")
+                    txt_general.delete("1.0", "end")
+                    txt_general.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_general.configure(state="disabled")
+                    txt_general.yview_moveto(0)
+                    general_frame.tkraise()
+
+            # inicializa
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # rodapé
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            modal.bind("<Escape>", lambda e: modal.destroy())
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Estoque):", e)
 
     def abrir_dialogo_exportacao(self):
         """
@@ -1215,7 +1563,6 @@ class Janela_InsercaoNF(tk.Toplevel):
 
         for coluna in range(num_colunas * 2):
             frame_campos.grid_columnconfigure(coluna, weight=1)
-
 
     def confirmar_editar(self, item_id, nf_original, janela_edit):
         """Confirma a edição de uma linha."""

@@ -41,8 +41,53 @@ class InterfaceUsuarios:
         self._configurar_estilo()
         
         # Cabeçalho (igual à janela Material)
-        cabecalho = tk.Label(self.janela_usuarios, text="Gerenciamento de Usuários", font=("Arial", 24, "bold"), bg="#34495e", fg="white", pady=15)
-        cabecalho.pack(fill=tk.X)
+        self.header_container = tk.Frame(self.janela_usuarios, bg="#34495e")
+        self.header_container.pack(fill=tk.X)
+
+        # Label principal (título) — armazenado como atributo para uso posterior se necessário
+        self.cabecalho = tk.Label(self.header_container,
+                                text="Gerenciamento de Usuários",
+                                font=("Arial", 24, "bold"),
+                                bg="#34495e", fg="white", pady=15)
+        self.cabecalho.pack(side="left", fill=tk.X, expand=True)
+
+        # ---------- Botão de Ajuda seguro (colocado no mesmo header_container) ----------
+        self.help_frame = tk.Frame(self.header_container, bg="#34495e")
+        self.help_frame.pack(side="right", padx=(8, 12), pady=6)
+
+        self.botao_ajuda_usuarios = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_usuarios_modal()
+        )
+        self.botao_ajuda_usuarios.bind("<Enter>", lambda e: self.botao_ajuda_usuarios.config(bg="#3b5566"))
+        self.botao_ajuda_usuarios.bind("<Leave>", lambda e: self.botao_ajuda_usuarios.config(bg="#2c3e50"))
+        self.botao_ajuda_usuarios.pack(side="right", padx=(4, 6), pady=4)
+
+        # Tooltip (pequeno, não bloqueante) — usa o método já definido na classe
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_usuarios, "Ajuda de Usuários (F1)")
+        except Exception:
+            pass
+
+        # Atalho F1: vincular ao Toplevel dessa janela (mais seguro que bind_all global)
+        try:
+            # vincula o evento F1 ao toplevel da janela de usuários (apenas quando janela estiver aberta)
+            self.janela_usuarios.bind_all("<F1>", lambda e: self._abrir_ajuda_usuarios_modal())
+            # opcionalmente, também permitir fechar modal com Esc (feito dentro do modal)
+        except Exception:
+            try:
+                # fallback: bind simples na janela de usuários
+                self.janela_usuarios.bind("<F1>", lambda e: self._abrir_ajuda_usuarios_modal())
+            except Exception:
+                pass
         
         # Frame para as entradas de cadastro
         frame_cadastros = ttk.Frame(self.janela_usuarios, style="Custom.TFrame")
@@ -169,6 +214,274 @@ class InterfaceUsuarios:
                   foreground=[("active", "white")],
                   relief=[("pressed", "sunken"), ("!pressed", "raised")])
         return style
+
+    def _create_tooltip(self, widget, text, delay=450, max_width=None):
+        """
+        Tooltip melhorado: quebra automática de linhas e ajuste para não sair da tela.
+        - widget: widget alvo
+        - text: texto do tooltip
+        - delay: ms até exibir
+        - max_width: largura máxima do tooltip em pixels (opcional)
+        """
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            # determina wraplength: respeita max_width se passado, senão calcula baseado na tela
+            if max_width:
+                wrap_len = max(120, min(max_width, screen_w - 80))
+            else:
+                wrap_len = min(360, max(200, screen_w - 160))
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial: centrado horizontalmente sobre o widget, abaixo do widget
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajustar horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajustar verticalmente: tenta abaixo; se não couber, tenta acima; senão limita dentro da tela
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_usuarios_modal(self, contexto=None):
+        """Abre modal profissional explicando como adicionar, editar, excluir usuários e gerenciar permissões."""
+        try:
+            modal = tk.Toplevel(self.janela_usuarios)
+            modal.title("Ajuda — Usuários")
+            modal.transient(self.janela_usuarios)  # deixa modal "transient" em relação à janela de usuários
+            modal.grab_set()
+
+            # Dimensões e centralização
+            w, h = 900, 650
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            caminho_icone = "C:\\Sistema\\logos\\Kametal.ico"
+            aplicar_icone(modal, caminho_icone)
+
+            # Cabeçalho
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Gerenciamento de Usuários", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: nav esquerda + conteúdo direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=240, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Como Adicionar Usuário",
+                "Como Editar Usuário",
+                "Como Excluir Usuário",
+                "Como Gerenciar Permissões",
+                "Validações e Erros Comuns",
+                "Boas Práticas / Segurança",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # Conteúdo das seções (personalize conforme desejar)
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "A tela de Usuários permite criar, editar, remover usuários e atribuir permissões "
+                "a funcionalidades (janelas) do sistema. A interface apresenta campos (Nome, Usuário, Senha), "
+                "uma lista (Treeview) com os usuários existentes e botões para ações."
+            )
+
+            contents["Como Adicionar Usuário"] = (
+                "Como Adicionar Usuário — Passo a passo\n\n"
+                "1) Preencha os campos: Nome, Usuário e Senha.\n"
+                "   • Observação: no código atual a senha é validada como 1 a 6 dígitos numéricos.\n"
+                "2) (Opcional) Marque 'Mostrar Senha' para conferir a senha.\n"
+                "3) Clique em 'Adicionar'.\n"
+                "4) O sistema executa INSERT no banco; se sucesso, a Treeview é atualizada automaticamente.\n\n"
+                "Dicas:\n"
+                " - Use nomes claros e padrão de login previsível (ex.: primeiro.nome).\n"
+                " - Após criar o usuário, abra Permissões para configurar acessos."
+            )
+
+            contents["Como Editar Usuário"] = (
+                "Como Editar Usuário — Passo a passo\n\n"
+                "1) Selecione o usuário na lista (Treeview).\n"
+                "2) Clique em 'Alterar Usuário' (ou botão equivalente).\n"
+                "3) Na janela de edição altere Nome / Usuário / Senha conforme necessário.\n"
+                "4) Clique em 'Salvar' para aplicar as mudanças (UPDATE no banco).\n\n"
+                "Observações:\n"
+                " - Validações são aplicadas (campos obrigatórios e formato de senha).\n"
+                " - O código dispara notificações para sincronizar outras janelas após alteração."
+            )
+
+            contents["Como Excluir Usuário"] = (
+                "Como Excluir Usuário — Passo a passo\n\n"
+                "1) Selecione um ou mais usuários na Treeview.\n"
+                "2) Clique em 'Excluir'.\n"
+                "3) Confirme a exclusão na caixa de diálogo que aparece.\n"
+                "4) O sistema executa DELETE por ID e atualiza a lista.\n\n"
+                "Recomendações:\n"
+                " - Prefira desativar o usuário em vez de excluir, se precisar manter histórico.\n"
+                " - Faça backup antes de operações em lote."
+            )
+
+            contents["Como Gerenciar Permissões"] = (
+                "Como Gerenciar Permissões — Passo a passo\n\n"
+                "1) Selecione o usuário e clique em 'Abrir Permissões'. Isso abre a janela de permissões (InterfacePermissoes).\n"
+                "2) No combobox, escolha o usuário (id - nome).\n"
+                "3) Marque as checkboxes correspondentes às janelas/modulos aos quais quer dar acesso.\n"
+                "   • Desmarque para remover acesso.\n"
+                "4) Clique em 'Salvar'. O procedimento atual sincroniza a tabela de permissões:\n"
+                "   geralmente faz DELETE das permissões atuais do usuário e INSERT das marcadas (ou calcula diffs).\n\n"
+                "Notas técnicas:\n"
+                " - Garanta que as chaves de 'janela' usadas nas permissões correspondam aos nomes que o código\n"
+                "   verifica antes de liberar acesso a cada funcionalidade.\n"
+                " - Após salvar, as mudanças devem refletir imediatamente (NOTIFY) ou ao atualizar a janela."
+            )
+
+            contents["Validações e Erros Comuns"] = (
+                "Validações e Erros Comuns\n\n"
+                " - Senha inválida: verifique o formato (no layout atual, somente dígitos 1-6).\n"
+                " - Usuário duplicado: IntegrityError do banco — verifique mensagens retornadas e mostre alerta.\n"
+                " - Falha de conexão com banco: operações de CRUD vão falhar — checar logs e conexão.\n"
+            )
+
+            contents["Boas Práticas / Segurança"] = (
+                "Boas Práticas e Segurança\n\n"
+                " - Use senhas fortes e, se possível, migre para armazenamento com hash (bcrypt/sha).\n"
+                " - Aplique princípio do menor privilégio: conceda apenas as permissões necessárias.\n"
+                " - Mantenha logs de auditoria e backups regulares do banco de dados."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Usuários\n\n"
+                "Q: Posso criar um usuário com o mesmo nome de outro?\n"
+                "A: Não é recomendado; o banco pode rejeitar por constraint. Use identificadores únicos.\n\n"
+                "Q: Como ver quais permissões um usuário tem?\n"
+                "A: Verifique a coluna de permissões na Treeview ou abra a janela de Permissões para visualizar.\n"
+            )
+
+            # Função para mostrar conteúdo
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            # Inicializa com a primeira seção
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé com botão Fechar
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            # Atalhos
+            modal.bind("<Escape>", lambda e: modal.destroy())
+
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (Usuários):", e)
 
     def proximo_id_disponivel(self):
         """Obtém o próximo ID disponível na tabela de usuários."""

@@ -237,6 +237,38 @@ class Janela_Menu(tk.Tk):
         self.botao_atualizar.bind("<Leave>", lambda e: self.botao_atualizar.config(bg="#2980b9"))
         self.botao_atualizar.pack(side="right", padx=(8, 0))
 
+        # Botão Ajuda (profissional, com tooltip e atalho F1)
+        self.help_frame = tk.Frame(self.right_frame, bg="#34495e")
+        self.help_frame.pack(side="right", padx=(6, 4))
+
+        self.botao_ajuda = tk.Button(
+            self.help_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Helvetica", 12, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=lambda: self._abrir_ajuda_modal()
+        )
+        # efeitos ao passar o mouse (consistente com o resto)
+        self.botao_ajuda.bind("<Enter>", lambda e: self.botao_ajuda.config(bg="#3b5566"))
+        self.botao_ajuda.bind("<Leave>", lambda e: self.botao_ajuda.config(bg="#2c3e50"))
+        self.botao_ajuda.pack(side="right", padx=(0, 6))
+
+        # Tooltip acessível (texto curto)
+        try:
+            self._create_tooltip(self.botao_ajuda, "Ajuda (F1)")
+        except Exception:
+            pass
+
+        # Atalho global F1 para abrir Ajuda
+        try:
+            self.bind_all("<F1>", lambda e: self._abrir_ajuda_modal())
+        except Exception:
+            pass
+
         # --- só cria o sino/badges se o usuário tiver a permissão para Cálculo de NFs ---
         if "Calculo_Produto" in self.permissoes:
             self.purge_frame = tk.Frame(self.right_frame, bg="#34495e")
@@ -719,6 +751,315 @@ class Janela_Menu(tk.Tk):
 
         except Exception as e_outer:
             messagebox.showerror("Exportar", f"Erro inesperado ao exportar:\n{e_outer}")
+
+    def _create_tooltip(self, widget, text, delay=450, max_width=None):
+        """
+        Tooltip melhorado: quebra automática de linhas e ajuste para não sair da tela.
+        - widget: widget alvo
+        - text: texto do tooltip
+        - delay: ms até exibir
+        - max_width: largura máxima do tooltip em pixels (opcional)
+        """
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            try:
+                screen_w = widget.winfo_screenwidth()
+                screen_h = widget.winfo_screenheight()
+            except Exception:
+                screen_w, screen_h = 1024, 768
+
+            # determina wraplength: respeita max_width se passado, senão calcula baseado na tela
+            if max_width:
+                wrap_len = max(120, min(max_width, screen_w - 80))
+            else:
+                wrap_len = min(360, max(200, screen_w - 160))
+
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=wrap_len
+            )
+            label.pack()
+
+            # posição inicial: centrado horizontalmente sobre o widget, abaixo do widget
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # ajustar horizontalmente para não sair da tela
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 10:
+                x = 10
+
+            # ajustar verticalmente: tenta abaixo; se não couber, tenta acima; senão limita dentro da tela
+            if y + h > screen_h:
+                y_above = widget.winfo_rooty() - h - 6
+                if y_above > 10:
+                    y = y_above
+                else:
+                    y = max(10, screen_h - h - 10)
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_modal(self, contexto=None):
+        """Modal de Ajuda com layout profissional (navegação à esquerda e conteúdo à direita)."""
+        try:
+            modal = tk.Toplevel(self)
+            modal.title("Ajuda — Sistema Kametal")
+            modal.transient(self)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões e centralização
+            w, h = 920, 700
+            x = max(0, (self.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (self.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(780, 520)
+
+            # Tentar aplicar ícone (se a função existir)
+            try:
+                aplicar_icone(modal, getattr(self, "caminho_icone", None))
+            except Exception:
+                pass
+
+            # ======= Cabeçalho =======
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=18)
+            tk.Label(header, text="Guia rápido e descrição das telas (F1)", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=8)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # ======= Corpo: Navigation (esq) + Conteúdo (dir) =======
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            # Left: navegação
+            nav_frame = tk.Frame(body, width=240, bg="#f5f7fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+
+            nav_title = tk.Label(nav_frame, text="Seções", bg="#f5f7fa",
+                                font=("Segoe UI", 10, "bold"))
+            nav_title.pack(anchor="nw", pady=(8, 6), padx=12)
+
+            # Listbox com seções
+            sections = [
+                "Visão Geral",
+                "Saída de NFs",
+                "Base de Produtos",
+                "Base de Materiais",
+                "Entrada de NFs",
+                "Cálculo de NFs",
+                "Média Custo",
+                "Relatório Item por Grupo",
+                "Relatório Cotação",
+                "Registro de Teste",
+                "Usuários",
+                "Abas e Visões Rápidas",
+                "Fluxo / Estoque (impactos)",
+                "Exemplos Práticos",
+                "FAQ"
+            ]
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#fefefe")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            # Right: área de conteúdo (Text rolável)
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+
+            txt = tk.Text(content_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb = tk.Scrollbar(content_frame, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+
+            # Conteúdo por seção (substitua texto se quiser)
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "A Janela Menu é a tela inicial do Sistema Kametal. Reúne acesso rápido aos módulos principais\n"
+                "e mostra resumos com as últimas movimentações (entradas/saídas, produtos e pesos).\n\n"
+                "Áreas principais: barra lateral de navegação, cabeçalho superior, área central com abas e rodapé."
+            )
+
+            contents["Saída de NFs"] = (
+                "Saída de NFs\n\n"
+                "Esta janela registra e exibe as notas fiscais de saída (clientes). Contém: número da NF, cliente,\n"
+                "itens, peso por item e total. Ao confirmar uma saída, o sistema subtrai (debita) o peso/quantidade\n"
+                "dos produtos do estoque."
+            )
+
+            contents["Base de Produtos"] = (
+                "Base de Produtos\n\n"
+                "Catálogo com todos os produtos da empresa: nome, código, unidade e referência às matérias-primas.\n"
+                "Use para consultar detalhes do produto, histórico e ligação com custos."
+            )
+
+            contents["Base de Materiais"] = (
+                "Base de Materiais\n\n"
+                "Armazena as matérias-primas (insumos) usadas na fabricação. Informações chave: estoque, unidade\n"
+                "e composição (por exemplo, % de cobre, % de zinco). Esses valores são usados no cálculo do custo\n"
+                "e na composição dos produtos."
+            )
+
+            contents["Entrada de NFs"] = (
+                "Entrada de NFs\n\n"
+                "Tela para registrar as notas fiscais recebidas de fornecedores. Ao salvar uma NF de entrada, os\n"
+                "produtos/quantidades/pesos são adicionados (somados) ao estoque conforme informado."
+            )
+
+            contents["Cálculo de NFs"] = (
+                "Cálculo de NFs\n\n"
+                "Ferramenta que calcula o custo associado a cada NF de entrada. Aplica regras como perdas, rendimentos\n"
+                "e rateio entre itens, usando informações de Base de Materiais e Base de Produtos para distribuir custos."
+            )
+
+            contents["Média Custo"] = (
+                "Média Custo\n\n"
+                "Exibe a média de custo por produto — útil para análises e comparações ao longo do tempo.\n"
+                "A média é calculada a partir das entradas e ajustes aplicados no período."
+            )
+
+            contents["Relatório Item por Grupo"] = (
+                "Relatório Item por Grupo\n\n"
+                "Gera relatórios mensais ou por período que mostram o que entrou e saiu por grupos/famílias de itens.\n"
+                "Também calcula a média de custo dos produtos no período selecionado."
+            )
+
+            contents["Relatório Cotação"] = (
+                "Relatório Cotação\n\n"
+                "Área para registrar cotações e valores de referência (preço do produto, câmbio). A partir desses dados\n"
+                "o sistema monta gráficos que ajudam a visualizar tendências e impactos no custo."
+            )
+
+            contents["Registro de Teste"] = (
+                "Registro de Teste\n\n"
+                "Módulo para armazenar histórico de testes e inspeções feitos nos produtos que saem — por exemplo,\n"
+                "controle de qualidade, amostras, observações técnicas. Útil para rastreabilidade."
+            )
+
+            contents["Usuários"] = (
+                "Usuários\n\n"
+                "Tela de gestão de usuários: criar, editar, remover e atribuir permissões. Controle de acesso\n"
+                "importante para evitar ações não autorizadas (ex.: excluir registros, alterar preços)."
+            )
+
+            contents["Abas e Visões Rápidas"] = (
+                "Abas e Visões Rápidas\n\n"
+                "As abas centrais (ex.: 'Últimas NFs') mostram uma visão rápida do sistema: tabelas com as últimas\n"
+                "movimentações, filtros e seleção para acessar detalhes. Sirvem para monitoramento diário."
+            )
+
+            contents["Fluxo / Estoque (impactos)"] = (
+                "Fluxo / Estoque — Impacto das ações\n\n"
+                " - Entrada de NF: soma ao estoque.\n"
+                " - Saída de NF: subtrai do estoque.\n"
+                " - Cálculo de NFs: em geral analítico; verifique se existe confirmação que aplica ajustes ao estoque.\n\n"
+                "Boas práticas: validar pesos antes de confirmar, reconciliar inventário e manter backups."
+            )
+
+            contents["Exemplos Práticos"] = (
+                "Exemplos Práticos (resumido)\n\n"
+                "1) Registrar entrada: Entrada de NFs → Nova NF → preencher produtos e salvar → estoque aumenta.\n"
+                "2) Registrar saída: Saída de NFs → Nova NF de saída → preencher e confirmar → estoque diminui.\n"
+                "3) Ver média: Média Custo / Relatório Item por Grupo → selecionar período → gerar relatório."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Perguntas Frequentes\n\n"
+                "Q: Onde vejo % de cobre/zinco de um material?\n"
+                "R: Em 'Base de Materiais' (cada material armazena sua composição).\n\n"
+                "Q: O que fazer se o estoque não bater?\n"
+                "R: Verificar lançamentos recentes, executar inventário e revisar logs; se necessário, chamar suporte."
+            )
+
+            # Função para mostrar conteúdo na área de texto
+            def mostrar_secao(key):
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                txt.configure(state="disabled")
+                txt.yview_moveto(0)
+
+            # Inicializa com a primeira seção selecionada
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            # Bind para mudar seção ao clicar
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    idx = sel[0]
+                    key = sections[idx]
+                    mostrar_secao(key)
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # ======= Rodapé com botão Fechar =======
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right")
+
+            # Atalho Esc para fechar modal
+            modal.bind("<Escape>", lambda e: modal.destroy())
+
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            print("Erro ao abrir modal de ajuda (profissional):", e)
 
     def _get_purge_summary_safe(self):
         """
@@ -1749,9 +2090,27 @@ class Janela_Menu(tk.Tk):
                 tree_saida_header.selection_set(primeiro_item)
                 atualizar_produtos(None)
 
-    def criar_relatorio_estoque(self, conn):
-        from media_custo import buscar_estoque, buscar_produtos
-        conn = conectar()
+    def criar_relatorio_estoque(self, conn=None):
+        # tenta usar a versão em classe (MediaCusto). Se não existir, tenta as funções antigas.
+        try:
+            from media_custo import MediaCusto as _MediaCustoClass
+
+            def buscar_produtos(conn):
+                inst = object.__new__(_MediaCustoClass)
+                inst.conn = conn
+                return _MediaCustoClass.buscar_produtos(inst)
+
+            def buscar_estoque(conn, nome_produto):
+                inst = object.__new__(_MediaCustoClass)
+                inst.conn = conn
+                return _MediaCustoClass.buscar_estoque(inst, nome_produto)
+
+        except Exception:
+            from media_custo import buscar_produtos, buscar_estoque
+
+        # Se não foi passada conexão, cria uma nova
+        if conn is None:
+            conn = conectar()
         if conn is None:
             print("Erro: Não foi possível conectar ao banco de dados.")
             return
@@ -1760,11 +2119,20 @@ class Janela_Menu(tk.Tk):
         for widget in self.frame_relatorio.winfo_children():
             widget.destroy()
 
+        # Busca produtos e quantidades
         produtos_bd = buscar_produtos(conn)
         produtos = []
         for produto in produtos_bd:
             nome_produto = produto[0]
-            qtd_estoque = buscar_estoque(conn, nome_produto)
+            try:
+                qtd_estoque = buscar_estoque(conn, nome_produto)
+            except Exception as e:
+                # segurança: se a função esperar assinatura diferente, tenta compatibilizar
+                try:
+                    qtd_estoque = buscar_estoque(conn, nome_produto)  # repetir por clareza; mantém contrato
+                except Exception:
+                    qtd_estoque = "0,000 kg"
+                    print(f"Erro ao obter estoque para {nome_produto}: {e}")
             produtos.append((nome_produto, qtd_estoque))
 
         produtos.sort(key=lambda produto: produto[0].lower())
