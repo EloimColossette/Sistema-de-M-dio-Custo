@@ -64,12 +64,47 @@ class CadastroProdutosApp:
         # Rodapé com botões
         self.frame_voltar = ttk.Frame(self.window, padding=(10,5))
         self.frame_voltar.grid(row=1, column=0, sticky="ew")
+
+        # frame específico para botões à direita (export / ajuda)
+        self.frame_export = ttk.Frame(self.frame_voltar)
+        self.frame_export.pack(side="right", padx=6, pady=5)
+
+        # botões à esquerda (Voltar) permanecem no frame_voltar
         self.botao_voltar = ttk.Button(self.frame_voltar, text="Voltar", command=self.voltar, style="RelatorioCota.TButton")
-        self.botao_excel = ttk.Button(self.frame_voltar, text="Exportar Excel", command=self.exportar_excel, style="RelatorioCota.TButton")
-        self.botao_pdf = ttk.Button(self.frame_voltar, text="Exportar PDF", command=self.exportar_pdf, style="RelatorioCota.TButton")
         self.botao_voltar.pack(side="left", padx=(0,10), pady=5)
+
+        # agora cria os botões de exportação dentro de frame_export
+        self.botao_pdf = ttk.Button(self.frame_export, text="Exportar PDF", command=self.exportar_pdf, style="RelatorioCota.TButton")
+        self.botao_excel = ttk.Button(self.frame_export, text="Exportar Excel", command=self.exportar_excel, style="RelatorioCota.TButton")
         self.botao_pdf.pack(side="right", padx=(10,0), pady=5)
         self.botao_excel.pack(side="right", padx=(10,0), pady=5)
+
+        # --- Botão Ajuda (usa frame_export) ---
+        self.botao_ajuda_cotacao = tk.Button(
+            self.frame_export,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=self._abrir_ajuda_cotacao_modal
+        )
+        self.botao_ajuda_cotacao.pack(side="right", padx=6, pady=5)
+
+        # hover, F1 bind no Toplevel e tooltip (mesmo que na opção A)
+        self.botao_ajuda_cotacao.bind("<Enter>", lambda e: self.botao_ajuda_cotacao.config(bg="#3b5566"))
+        self.botao_ajuda_cotacao.bind("<Leave>", lambda e: self.botao_ajuda_cotacao.config(bg="#2c3e50"))
+        try:
+            self.window.bind("<F1>", lambda e: self._abrir_ajuda_cotacao_modal())
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda_cotacao, "Ajuda — Relatórios de Cotação (F1)")
+        except Exception:
+            pass
 
         # Configuração de grid
         self.window.grid_rowconfigure(0, weight=1)
@@ -210,6 +245,375 @@ class CadastroProdutosApp:
                         foreground="black",
                         font=("Arial", 12, "bold"))
         
+    def _create_tooltip(self, widget, text, delay=450):
+        """Tooltip com quebra de linha automática e ajuste para não sair da tela."""
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            # cria janela do tooltip
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            # label com wrap para quebrar linhas
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=300  # máx. largura do tooltip (pixels)
+            )
+            label.pack()
+
+            # calcula posição inicial
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            # força update para medir o tamanho real
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # limites da tela
+            screen_w = win.winfo_screenwidth()
+            screen_h = win.winfo_screenheight()
+
+            # ajusta posição horizontal se ultrapassar borda direita
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 0:
+                x = 10
+
+            # ajusta posição vertical se ultrapassar borda inferior
+            if y + h > screen_h:
+                y = widget.winfo_rooty() - h - 6  # mostra acima do widget
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_cotacao_modal(self, contexto=None):
+        """
+        Modal de ajuda para Relatórios / Cotação / Gráficos.
+        Corrigido para usar `self.window` como parent do modal (evita AttributeError).
+        """
+        try:
+            from tkinter import ttk
+
+            # --- Janela modal ---
+            modal = tk.Toplevel(self.window)              # <-- parent correto
+            modal.title("Ajuda — Relatórios / Cotação")
+            modal.transient(self.window)                  # <-- transient para o Toplevel pai
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização
+            w, h = 900, 640
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (silencioso se falhar)
+            try:
+                aplicar_icone(modal, r"C:\Sistema\logos\Kametal.ico")
+            except Exception:
+                pass
+
+            # --- Cabeçalho ---
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Relatórios / Cotação", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # --- Corpo: navegação esquerda + conteúdo direita ---
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            # NAV FRAME (lado esquerdo) - sem scrollbar visível
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0,12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold")).pack(anchor="nw", pady=(10,6), padx=12)
+
+            nav_list_container = tk.Frame(nav_frame, bg="#f6f8fa")
+            nav_list_container.pack(fill="both", expand=True, padx=10, pady=(0,10))
+
+            sections = [
+                "Visão Geral",
+                "Cotação — Aba Cadastro (Salvar / Editar / Excluir / Pesquisar)",
+                "Cotação — Regras de Formatação (Período / Valores)",
+                "Cotação Dólar — Inserir / Editar / Excluir / Média",
+                "Editar Datas no Local — (Passo a Passo)",
+                "Gráficos — Produtos",
+                "Gráficos — Dólar",
+                "Filtros e Pesquisa",
+                "Exportação (Excel / PDF)",
+                "FAQ"
+            ]
+
+            listbox = tk.Listbox(nav_list_container, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True)
+
+            # --- Area de conteúdo (grid + painéis) ---
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+            content_frame.rowconfigure(0, weight=1)
+            content_frame.columnconfigure(0, weight=1)
+
+            # painel geral (padrão)
+            general_frame = tk.Frame(content_frame, bg="white")
+            general_frame.grid(row=0, column=0, sticky="nsew")
+            general_frame.rowconfigure(0, weight=1)
+            general_frame.columnconfigure(0, weight=1)
+
+            txt_general = tk.Text(general_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_general = tk.Scrollbar(general_frame, command=txt_general.yview)  # scrollbar do painel de explicações
+            txt_general.configure(yscrollcommand=sb_general.set)
+            txt_general.grid(row=0, column=0, sticky="nsew")
+            sb_general.grid(row=0, column=1, sticky="ns")
+
+            # painel específico para edição/resumo (exemplo reaproveitável)
+            editar_frame = tk.Frame(content_frame, bg="white")
+            editar_frame.grid(row=0, column=0, sticky="nsew")
+            editar_frame.rowconfigure(0, weight=1)
+            editar_frame.columnconfigure(0, weight=1)
+
+            txt_editar = tk.Text(editar_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_editar = tk.Scrollbar(editar_frame, command=txt_editar.yview)
+            txt_editar.configure(yscrollcommand=sb_editar.set)
+            txt_editar.grid(row=0, column=0, sticky="nsew")
+            sb_editar.grid(row=0, column=1, sticky="ns")
+
+            # --- Conteúdo das seções (textos detalhados solicitados) ---
+            contents = {}
+
+            contents["Visão Geral"] = (
+            "Visão Geral\n\n"
+            "Esta ajuda descreve as ações básicas em Cotação (Produtos) e Cotação (Dólar) e mostra, passo a passo, como\n"
+            "editar datas *no próprio lugar* (sem precisar mexer no banco manualmente)."
+            )
+
+            contents["Cotação — Aba Cadastro (Salvar / Editar / Excluir / Pesquisar)"] = (
+                "Cotação — Aba Cadastro (Produtos)\n\n"
+                "Salvar:\n"
+                "- Digite o Período no campo 'Período' usando apenas dígitos. Não insira '/' nem 'á'.\n"
+                "- Preencha os valores dos produtos digitando só números (sem vírgula). O campo mostrará a vírgula automaticamente.\n"
+                "- Clique em SALVAR.\n\n"
+                "Editar:\n"
+                "- Selecione a linha desejada na tabela (Treeview). Os campos de Período e valores aparecerão nas entradas acima.\n"
+                "- Altere Período ou qualquer valor e clique em EDITAR para gravar a alteração.\n\n"
+                "Excluir:\n"
+                "- Selecione a linha e clique em EXCLUIR. Confirme para remover.\n\n"
+                "Pesquisar:\n"
+                "- Use o campo 'Pesquisar' para filtrar por período, data ou valor. Se digitar barras ('/'), a busca tenta interpretar como data; "
+                "se digitar apenas números, a busca é por texto/substring."
+            )
+
+            contents["Cotação Dólar — Inserir / Editar / Excluir / Média"] = (
+                "Cotação Dólar — Instruções essenciais\n\n"
+                "Inserir:\n"
+                "- Preencha 'Período' (opcional) com dígitos — o sistema formata as barras e o 'á'.\n"
+                "- Em 'Data' digite apenas dígitos no formato DDMMYYYY (ex.: 01012025). O campo adicionará as barras automaticamente.\n"
+                "- Em 'Dólar' digite apenas dígitos; o campo exibirá 4 casas decimais automaticamente.\n"
+                "- Clique em INSERIR para gravar.\n\n"
+                "Editar / Excluir:\n"
+                "- Para editar uma data específica: selecione a linha *filha* (a linha que mostra Data e Dólar) dentro do Período.\n"
+                "- O campo 'Data' será preenchido; altere para o novo valor (use apenas dígitos). Depois clique em EDITAR para atualizar.\n"
+                "- Para remover, selecione e clique em EXCLUIR. Confirme para excluir.\n\n"
+                "Média:\n"
+                "- Ao carregar um Período, o sistema calcula automaticamente a média dos registros daquele Período e a exibe na interface."
+            )
+
+            contents["Cotação — Regras de Formatação (Período / Valores)"] = (
+                "Regras de Formatação\n\n"
+                "- Período: digite apenas dígitos; o sistema converte automaticamente para 'DD/MM/AA' e para 'DD/MM/AA á DD/MM/AA' quando houver intervalo.\n"
+                "- Valores de produto: digite apenas dígitos (ex.: 12345 → o campo mostra 123,45). Não é preciso inserir vírgula manualmente.\n"
+                "- Caso cole texto com pontos (separador de milhares), revise antes de salvar e remova pontos se necessário."
+            )
+
+            contents["Editar Datas no Local — (Passo a Passo)"] = (
+                "Editar Datas no Local — Passo a passo (Produtos e Dólar)\n\n"
+                "1) Selecionar o item correto:\n"
+                "   - Cotação (Produtos): selecione a linha correspondente ao Período que quer alterar (a linha contém 'Período' e valores).\n"
+                "   - Cotação (Dólar): expanda o Período e selecione a linha *de data* (filho) se quiser alterar apenas a Data ou o valor do Dólar.\n\n"
+                "2) Os campos de entrada serão preenchidos automaticamente ao selecionar a linha.\n\n"
+                "3) Alterar a Data no local:\n"
+                "   - Em 'Data' (Dólar): digite DDMMYYYY (apenas números). O campo transforma para 'DD/MM/YYYY'.\n"
+                "   - Em 'Período' (Produtos ou Dólar): digite os dígitos do período (ex.: 010125310125). O campo formata com barras e 'á'.\n\n"
+                "4) Confirmar alteração:\n"
+                "   - Clique em EDITAR para salvar a alteração do registro selecionado.\n"
+                "   - Se quiser mudar a data para um Período diferente, edite o campo Período e então EDITAR (ou exclua e reinsira o registro no período desejado).\n\n"
+                "Observações importantes:\n"
+                "- Não há edição 'em massa' diretamente na árvore; edições em lote devem ser feitas via import/planilha ou através de excluir + inserir.\n"
+                "- Para mover uma data de um período para outro sem perda de histórico, recomendamos exportar a linha, ajustar o Período e reimportar/inserir.\n"
+            )
+
+            contents["Gráficos — Produtos"] = (
+                "Gráficos de Produtos — foco em filtros e interpretações\n\n"
+                "- Controle de produtos: use as checkboxes para mostrar/ocultar séries (Cobre, Zinco, Ligas).\n"
+                "- Datas/períodos: use a árvore de Períodos para escolher o intervalo exibido. A estatística lateral atualiza com Máximo, Mínimo e Média.\n"
+                "- Estatísticas Gerais: o painel lateral exibe para cada produto:\n"
+                "   • Máximo — o maior valor registrado no período selecionado;\n"
+                "   • Mínimo — o menor valor registrado no período selecionado;\n"
+                "   • Média — média aritmética dos pontos exibidos (soma / quantidade).\n"
+                "  Use essas métricas para identificar amplitude (Máx − Mín) e tendência relativa entre produtos. As estatísticas são recalculadas automaticamente ao mudar filtros ou período.\n"
+                "- Legenda: identifica a cor de cada produto; a legenda ajuda a relacionar a linha do gráfico com o produto correspondente."
+            )
+
+            contents["Gráficos — Dólar"] = (
+                "Gráficos de Dólar — foco em datas e tendência\n\n"
+                "- Selecione dias, meses ou anos na árvore lateral para filtrar o gráfico.\n"
+                "- Estatísticas: o painel mostra Máximo, Mínimo e Média para a seleção atual e é atualizado automaticamente conforme você altera a seleção.\n"
+                "- Tendência: o mini-gráfico (sparkline) indica direção geral (Alta / Queda / Estável) da série selecionada.\n"
+                "- Tooltip: passe o mouse sobre os pontos da curva para ver um tooltip com a DATA e o VALOR exato do dólar; quando disponível, o tooltip também mostra a variação em relação ao ponto anterior."
+            )
+
+            contents["Filtros e Pesquisa"] = (
+                "Filtros e Pesquisa\n\n"
+                "- Use o campo 'Pesquisar' para localizar rapidamente períodos, datas ou valores.\n"
+                "- Para busca por data exata, digite com '/' (ex.: 01/01/25) ou use apenas números para pesquisa por substring.\n"
+            )
+
+            contents["Exportação (Excel / PDF)"] = (
+                "Exportação — lembretes úteis\n\n"
+                "- Ao exportar para Excel ou PDF, confirme que todas as datas e valores foram corrigidos no local (Treeview) antes de gerar o arquivo.\n"
+                "- Preferível exportar depois de ajustar médias/periodos para que os relatórios já reflitam as alterações."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Perguntas rápidas\n\n"
+                "Q: Posso editar várias datas ao mesmo tempo?\n"
+                "A: Não diretamente na árvore. Edite linha a linha ou utilize exportação/importação para alteração em massa.\n\n"
+                "Q: Preciso digitar barras no Período/Data?\n"
+                "A: Não — digite apenas dígitos; a aplicação acrescenta '/' e 'á' automaticamente.\n\n"
+                "Q: O que faço se transferir uma data para outro período?\n"
+                "A: Edite o campo Período do registro e salve (ou exclua e reinsira no Período desejado). Para manter histórico, exporte antes de alterar."
+            )
+
+            # --- Função para exibir a seção correta (usa tkraise para painéis) ---
+            def mostrar_secao(key):
+                # Decide qual painel usar; exemplo: se for seção de edição usamos painel editar_frame
+                usar_editar = (key == "Cotação — Regras de Formatação (Período / Valores)" or key == "Editar Estoque / Enviar para Resumo (Resumido)")
+                if usar_editar:
+                    txt_editar.configure(state="normal")
+                    txt_editar.delete("1.0", "end")
+                    txt_editar.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_editar.configure(state="disabled")
+                    txt_editar.yview_moveto(0)
+                    editar_frame.tkraise()
+                else:
+                    txt_general.configure(state="normal")
+                    txt_general.delete("1.0", "end")
+                    txt_general.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_general.configure(state="disabled")
+                    txt_general.yview_moveto(0)
+                    general_frame.tkraise()
+
+            # Inicializa exibindo a primeira seção
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            # Bind para seleção
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # --- Bindings do mousewheel (melhora rolagem) ---
+            def _on_mousewheel_text(event):
+                if hasattr(event, "delta") and event.delta:
+                    # Windows/macOS
+                    txt_general.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    txt_editar.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                elif event.num == 4:
+                    txt_general.yview_scroll(-1, "units")
+                    txt_editar.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    txt_general.yview_scroll(1, "units")
+                    txt_editar.yview_scroll(1, "units")
+
+            def _on_mousewheel_listbox(event):
+                if hasattr(event, "delta") and event.delta:
+                    listbox.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                elif event.num == 4:
+                    listbox.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    listbox.yview_scroll(1, "units")
+
+            txt_general.bind("<MouseWheel>", _on_mousewheel_text)
+            txt_general.bind("<Button-4>", _on_mousewheel_text)
+            txt_general.bind("<Button-5>", _on_mousewheel_text)
+            txt_editar.bind("<MouseWheel>", _on_mousewheel_text)
+            txt_editar.bind("<Button-4>", _on_mousewheel_text)
+            txt_editar.bind("<Button-5>", _on_mousewheel_text)
+            listbox.bind("<MouseWheel>", _on_mousewheel_listbox)
+            listbox.bind("<Button-4>", _on_mousewheel_listbox)
+            listbox.bind("<Button-5>", _on_mousewheel_listbox)
+
+            # --- Rodapé com botão Fechar ---
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            # bind ESC para fechar o modal
+            modal.bind("<Escape>", lambda e: modal.destroy())
+
+            # atalho F1 para o modal (opcional): vincula ao modal para que quando ele estiver aberto o F1 funcione
+            try:
+                modal.bind("<F1>", lambda e: None)
+            except Exception:
+                pass
+
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            # mostra erro mais informativo no console (para debugar)
+            import traceback
+            traceback.print_exc()
+            print("Erro ao abrir modal de ajuda (Relatórios):", e)
+
+   
     def obter_menor_id_disponivel(self):
         self.cursor.execute("SELECT id FROM cotacao_produtos ORDER BY id")
         ids = [row[0] for row in self.cursor.fetchall()]

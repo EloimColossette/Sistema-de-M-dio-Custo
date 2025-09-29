@@ -20,16 +20,23 @@ import calendar
 
 class CalculoProduto:
     def __init__(self, janela_menu=None, *args, **kwargs):
-        # guarda referência do menu (se foi passada)
+        # referência do menu (se fornecida)
         self.janela_menu = janela_menu or kwargs.get("janela_menu", None)
-        self.janela_menu = janela_menu
+
+        # janela própria
         self.root = tk.Toplevel()
         self.root.title("Calculo de Nfs")
         self.root.geometry("1200x700")
-        self.root.state("zoomed")
+        try:
+            self.root.state("zoomed")
+        except Exception:
+            pass
 
-         # determina usuário para registrar: prioridade
-        # 1) menu.user_name  2) kwargs['usuario']  3) getpass.getuser()
+        # controle para threads e timeout
+        self._closed = False
+        self._startup_timeout_id = None
+
+        # determina usuário
         try:
             if self.janela_menu and getattr(self.janela_menu, "user_name", None):
                 self.usuario = self.janela_menu.user_name
@@ -38,35 +45,44 @@ class CalculoProduto:
         except Exception:
             self.usuario = kwargs.get("usuario") or getpass.getuser()
 
-        # Oculta a janela de menu
-        self.janela_menu.withdraw()
-
-        # Aplica o ícone (defina ou adapte a função aplicar_icone conforme necessário)
-        aplicar_icone(self.root, "C:\\Sistema\\logos\\Kametal.ico")
-
-        self.configurar_estilo()
-        self.criar_widgets()
-        self.carregar_dados_iniciais()
-
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        # reaplica estilo ao ser exibida ou ao ganhar foco — não cria função nova
-        self.root.bind("<Map>", lambda e: self.configurar_estilo())
-        self.root.bind("<FocusIn>", lambda e: self.configurar_estilo())
-
-        # Chama a função que reorganiza os IDs ao inicializar a janela
-        self.reiniciar_ids_estoque()
-
-    def configurar_estilo(self):
-        # usa o Style global (sem amarrar ao Toplevel) para garantir que theme_use afete tudo
-        self.style = ttk.Style()
+        # oculta menu, se houver
         try:
-            # força o theme desejado (igual à primeira imagem)
-            self.style.theme_use("alt")
+            if self.janela_menu:
+                self.janela_menu.withdraw()
         except Exception:
             pass
 
-        # configura Treeview globalmente do jeito que você quer
+        # tenta aplicar ícone (opcional)
+        try:
+            aplicar_icone(self.root, "C:\\Sistema\\logos\\Kametal.ico")
+        except Exception:
+            pass
+
+        # inicializa UI
+        self.configurar_estilo()
+        self.criar_widgets()
+
+        # mostra overlay de carregamento e dispara o carregamento em background
+        try:
+            self._show_loading("Carregando dados...")
+        except Exception:
+            pass
+
+        threading.Thread(target=self._startup_background_tasks, daemon=True).start()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.bind("<Map>", lambda e: self.configurar_estilo())
+        self.root.bind("<FocusIn>", lambda e: self.configurar_estilo())
+
+        # reorganiza ids em background (se necessário)
+        threading.Thread(target=self.reiniciar_ids_estoque, daemon=True).start()
+
+    def configurar_estilo(self):
+        self.style = ttk.Style()
+        try:
+            self.style.theme_use("alt")
+        except Exception:
+            pass
         try:
             self.style.configure("Treeview",
                                 background="white",
@@ -75,7 +91,6 @@ class CalculoProduto:
                                 fieldbackground="white",
                                 font=("Arial", 10))
         except Exception:
-            # se algum option não for suportado na plataforma, ignora
             try:
                 self.style.configure("Treeview",
                                     background="white",
@@ -84,82 +99,64 @@ class CalculoProduto:
                                     fieldbackground="white")
             except Exception:
                 pass
-
         try:
             self.style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
         except Exception:
             pass
-
         try:
             self.style.map("Treeview",
-                        background=[("selected", "#0078D7")],
-                        foreground=[("selected", "white")])
+                           background=[("selected", "#0078D7")],
+                           foreground=[("selected", "white")])
         except Exception:
             pass
-
-        # garante que, se o treeview já existir, receba o estilo e altura desejada
         if hasattr(self, "treeview"):
             try:
-                self.treeview.config(style="Treeview", height=15)  # volta pra 15, como antes
+                self.treeview.config(style="Treeview", height=15)
             except Exception:
                 pass
-    
+
     def criar_widgets(self):
-        # Frame superior para entradas
         self.frame_top = ttk.Frame(self.root)
         self.frame_top.pack(padx=15, pady=(10, 0), fill="x")
-    
+
         ttk.Label(self.frame_top, text="Produto:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
         self.entrada_produto = ttk.Combobox(self.frame_top, width=25, values=[], state="normal")
         self.entrada_produto.pack(side="left", padx=(0, 10))
-    
-        # Digitar Valor do Peso
+
         ttk.Label(self.frame_top, text="Digitar Valor do Peso:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
         self.entrada_valor = ttk.Entry(self.frame_top, width=10)
         self.entrada_valor.pack(side="left", padx=(0, 10))
-        # aqui aplicamos o bind para formatação
-        self.entrada_valor.bind("<KeyRelease>", lambda e: self.formatar_numero(e, 3))
-    
-        # Combobox para selecionar a operação
+        try:
+            self.entrada_valor.bind("<KeyRelease>", lambda e: self.formatar_numero(e, 3))
+        except Exception:
+            pass
+
         ttk.Label(self.frame_top, text="Operação:", font=("Arial", 10, "bold")).pack(side="left", padx=(10, 1))
         self.combo_operacao = ttk.Combobox(self.frame_top, values=["Adicionar", "Subtrair"], state="readonly", width=15)
         self.combo_operacao.set("Subtrair")
         self.combo_operacao.pack(side="left", padx=(1, 10))
-    
-        # Frame para os botões
+
+        # botoes
         self.frame_botoes = ttk.Frame(self.root)
         self.frame_botoes.pack(padx=15, fill="x")
 
-        # --- Botão de ajuda (correção: sem cget("background") no ttk.Frame) ---
-        self.help_frame = tk.Frame(self.frame_top)   # sem bg = self.frame_top.cget("background")
+        self.help_frame = tk.Frame(self.frame_top)
         self.help_frame.pack(side="right", padx=(8, 12), pady=2)
-
         self.botao_ajuda_calculo = tk.Button(
-            self.help_frame,
-            text="❓",
-            fg="white",
-            bg="#2c3e50",
-            font=("Segoe UI", 10, "bold"),
-            bd=0,
-            relief="flat",
-            width=3,
+            self.help_frame, text="❓", fg="white", bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"), bd=0, relief="flat", width=3,
             command=lambda: self._abrir_ajuda_calculo_modal()
         )
         self.botao_ajuda_calculo.bind("<Enter>", lambda e: self.botao_ajuda_calculo.config(bg="#3b5566"))
         self.botao_ajuda_calculo.bind("<Leave>", lambda e: self.botao_ajuda_calculo.config(bg="#2c3e50"))
         self.botao_ajuda_calculo.pack(side="right", padx=(4, 6), pady=4)
 
-        # tooltip resumido (mostra pequeno texto no hover)
         try:
             if hasattr(self, "_create_tooltip"):
-                self._create_tooltip(self.botao_ajuda_calculo,
-                    "Ajuda — Cálculo de NFs: F1",
-                    max_width=380
-                )
+                self._create_tooltip(self.botao_ajuda_calculo, "Ajuda — Cálculo de NFs: F1", max_width=380)
         except Exception:
             pass
 
-        # também registra atalho F1 para abrir a ajuda (bind no Toplevel usado pela classe)
         try:
             self.root.bind_all("<F1>", lambda e: self._abrir_ajuda_calculo_modal())
         except Exception:
@@ -167,114 +164,435 @@ class CalculoProduto:
                 self.root.bind("<F1>", lambda e: self._abrir_ajuda_calculo_modal())
             except Exception:
                 pass
-    
-        # Frame para o Treeview e barras de rolagem
+
+        # Treeview area
         self.frame_tree = ttk.Frame(self.root)
         self.frame_tree.pack(fill="both", expand=True, padx=10, pady=10)
-    
-        colunas = ("Data", "NF", "Produto", "Peso Líquido", "Qtd Estoque", "Qtd Cobre", "Qtd Zinco", "Qtd Sucata", "Valor Total NF", "Mão de Obra", "Matéria Prima", "Custo Manual", "Custo Total")
+
+        colunas = ("Data", "NF", "Produto", "Peso Líquido", "Qtd Estoque", "Qtd Cobre",
+                   "Qtd Zinco", "Qtd Sucata", "Valor Total NF", "Mão de Obra",
+                   "Matéria Prima", "Custo Manual", "Custo Total")
         self.treeview = ttk.Treeview(self.frame_tree, columns=colunas, show="headings", height=15)
-        # Configuração de tags
-        self.treeview.tag_configure("red_text", foreground="red")
-        self.treeview.tag_configure("partial_red_text", foreground="Orange")
-    
+        try:
+            self.treeview.tag_configure("red_text", foreground="red")
+            self.treeview.tag_configure("partial_red_text", foreground="Orange")
+        except Exception:
+            pass
+
         for col in colunas:
             self.treeview.heading(col, text=col)
             self.treeview.column(col, anchor="center", width=200)
-    
+
         self.vsb = ttk.Scrollbar(self.frame_tree, orient="vertical", command=self.treeview.yview)
         self.hsb = ttk.Scrollbar(self.frame_tree, orient="horizontal", command=self.treeview.xview)
         self.treeview.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
-    
+
         self.treeview.grid(row=0, column=0, sticky="nsew")
         self.vsb.grid(row=0, column=1, sticky="ns")
         self.hsb.grid(row=1, column=0, sticky="ew")
         self.frame_tree.grid_rowconfigure(0, weight=1)
         self.frame_tree.grid_columnconfigure(0, weight=1)
-    
-        # Lista para armazenar itens ocultos do Treeview
+
         self.itens_ocultos = []
-    
-        # Botões
-        # === Botões (criação) ===
-        self.botao_atualizar = ttk.Button(
-            self.frame_botoes,
-            text="Calcular",
-            command=self.atualizar_produto,
-            style="Estoque.TButton"
-        )
-        self.botao_atualizar_custo_manual = ttk.Button(
-            self.frame_botoes,
-            text="Atualizar Custo Manual",
-            command=self.atualizar_custo_manual,
-            style="Estoque.TButton"
-        )
 
-        # cria (ou reutiliza) o botão de Histórico aqui
-        self.botao_notificacao = ttk.Button(
-            self.frame_botoes,
-            text="Historico de Calculo",
-            command=self.mostrar_historico,
-            style="Estoque.TButton"
-        )
+        # botoes inferiores
+        self.botao_atualizar = ttk.Button(self.frame_botoes, text="Calcular", command=self.atualizar_produto, style="Estoque.TButton")
+        self.botao_atualizar_custo_manual = ttk.Button(self.frame_botoes, text="Atualizar Custo Manual", command=self.atualizar_custo_manual, style="Estoque.TButton")
+        self.botao_notificacao = ttk.Button(self.frame_botoes, text="Historico de Calculo", command=self.mostrar_historico, style="Estoque.TButton")
+        self.botao_voltar = ttk.Button(self.frame_botoes, text="Voltar", command=self.voltar_para_menu, style="Estoque.TButton")
 
-        self.botao_voltar = ttk.Button(
-            self.frame_botoes,
-            text="Voltar",
-            command=self.voltar_para_menu,
-            style="Estoque.TButton"
-        )
-
-        # === Empacotar na ordem desejada ===
         self.botao_atualizar.pack(side="left", padx=5, pady=10)
         self.botao_atualizar_custo_manual.pack(side="left", padx=5, pady=10)
         self.botao_notificacao.pack(side="left", padx=5, pady=10)
         self.botao_voltar.pack(side="left", padx=5, pady=10)
-    
-        # Frame para a barra de pesquisa
+
+        # pesquisa
         self.frame_pesquisa = ttk.Frame(self.root)
         self.frame_pesquisa.pack(padx=15, pady=(5,10), fill="x")
-    
         ttk.Label(self.frame_pesquisa, text="Pesquisar:", font=("Arial", 10, "bold")).pack(side="left", padx=(10,1), pady=10)
-        
-        # Cria a StringVar para a pesquisa e adiciona o trace para formatação em tempo real
+
         self.search_var = tk.StringVar()
-        self.trace_id = self.search_var.trace_add("write", self.formatar_data)
-        
-        # Cria o Entry usando a StringVar
+        try:
+            self.trace_id = self.search_var.trace_add("write", self.formatar_data)
+        except Exception:
+            pass
+
         self.entrada_pesquisa = ttk.Entry(self.frame_pesquisa, width=25, textvariable=self.search_var)
         self.entrada_pesquisa.pack(side="left", padx=(0,10), pady=10)
-    
+
         self.botao_pesquisar = ttk.Button(self.frame_pesquisa, text="Buscar", command=self.pesquisar, style="Estoque.TButton")
         self.botao_pesquisar.pack(side="left", padx=5, pady=10)
-    
         self.botao_limpar_pesquisa = ttk.Button(self.frame_pesquisa, text="Limpar", command=self.limpar_pesquisa, style="Estoque.TButton")
         self.botao_limpar_pesquisa.pack(side="left", padx=5, pady=10)
-
         self.botao_exportar_excel = ttk.Button(self.frame_pesquisa, text="Exportar Excel", command=self.abrir_dialogo_exportacao, style="Estoque.TButton")
         self.botao_exportar_excel.pack(side="right", padx=5, pady=10)
-    
-        # Carrega os nomes dos produtos e associa ao combobox
-        self.todos_produtos = self.carregar_nomes_produtos()
+
+        # combobox bindings
+        self.todos_produtos = []
         self.entrada_produto['values'] = self.todos_produtos
-        self.entrada_produto.bind('<KeyRelease>', self.atualizar_sugestoes_produto)
-        self.entrada_pesquisa.bind("<Return>", lambda event: self.pesquisar())
-        self.entrada_pesquisa.bind("<KeyRelease>", lambda event: self.limpar_pesquisa() if self.entrada_pesquisa.get() == "" else None)
-    
-        # Carrega os dados e atualiza o Treeview
-        dados = self.carregar_dados()
-        self.calcular_dados(dados)
-        self.verificar_e_avisar_exportacao_inicio(dias_aviso=3)
-        # garantir tabela de histórico criada
-        self.garantir_tabela_historico()
-        # garantir que a rotina de purga esteja rodando
-        self.iniciar_rotina_purga_mensal()
-        # purga automática silenciosa na abertura caso tenha virado o mês
         try:
-            # chama o método que limpa registros de meses anteriores
-            self.purga_automatica_na_abertura()
+            self.entrada_produto.bind('<KeyRelease>', self.atualizar_sugestoes_produto)
         except Exception:
-            # não quer quebrar a inicialização se algo falhar aqui
+            pass
+        try:
+            self.entrada_pesquisa.bind("<Return>", lambda event: self.pesquisar())
+            self.entrada_pesquisa.bind("<KeyRelease>", lambda event: self.limpar_pesquisa() if self.entrada_pesquisa.get() == "" else None)
+        except Exception:
+            pass
+
+       # -----------------------
+        # Overlay de carregamento (texto com pontos) - RECOMENDADO (substituir o anterior)
+        # -----------------------
+        self.loading_overlay = tk.Frame(self.frame_tree, bg="#ffffff")
+        inner = tk.Frame(self.loading_overlay, bg="#ffffff")
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+        self.loading_label = tk.Label(inner, text="Carregando dados...", font=("Segoe UI", 12, "bold"), bg="#ffffff")
+        self.loading_label.pack(padx=8, pady=(6,4))
+
+        # controle da animação de pontos
+        self._loading_dots_seq = [3, 2, 1]   # sequência 3 -> 2 -> 1 -> 3 ...
+        self._loading_dots_index = 0
+        self._loading_dots_after_id = None
+        self._loading_running = False
+
+        self.loading_overlay.place_forget()
+
+    def _safe_after(self, ms, func):
+        """
+        Agenda func via self.root.after se a janela existir.
+        Retorna True se conseguiu agendar, False caso contrário.
+        """
+        try:
+            if hasattr(self, "root") and self.root and getattr(self.root, "winfo_exists", lambda: False)():
+                self.root.after(ms, func)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _startup_background_tasks(self):
+        """
+        Carrega nomes e dados em background. Garante finalização mesmo em erro.
+        """
+        # agenda timeout para evitar overlay preso (15s)
+        try:
+            try:
+                if getattr(self, "_startup_timeout_id", None):
+                    try: self.root.after_cancel(self._startup_timeout_id)
+                    except Exception: pass
+                self._startup_timeout_id = self.root.after(15000, self._startup_timeout_check)
+            except Exception:
+                self._startup_timeout_id = None
+        except Exception:
+            pass
+
+        todos_produtos = []
+        dados = []
+        rows = None
+        erro = None
+
+        try:
+            if getattr(self, "_closed", False):
+                return
+
+            try:
+                self.garantir_tabela_historico()
+            except Exception:
+                pass
+
+            try:
+                self.iniciar_rotina_purga_mensal()
+            except Exception:
+                pass
+
+            try:
+                todos_produtos = self.carregar_nomes_produtos() or []
+            except Exception as e:
+                traceback.print_exc()
+                todos_produtos = []
+                erro = e
+
+            if getattr(self, "_closed", False):
+                return
+
+            try:
+                dados = self.carregar_dados() or []
+            except Exception as e:
+                traceback.print_exc()
+                dados = []
+                erro = e
+
+            try:
+                if hasattr(self, "calcular_dados_db"):
+                    rows = self.calcular_dados_db(dados)
+            except Exception:
+                traceback.print_exc()
+                rows = None
+
+        except Exception as e:
+            erro = e
+            traceback.print_exc()
+        finally:
+            if getattr(self, "_closed", False):
+                try:
+                    self._hide_loading()
+                except Exception:
+                    pass
+                return
+
+            def _finish():
+                try:
+                    try:
+                        if getattr(self, "_startup_timeout_id", None):
+                            try: self.root.after_cancel(self._startup_timeout_id)
+                            except Exception: pass
+                            self._startup_timeout_id = None
+                    except Exception:
+                        pass
+
+                    if erro:
+                        try:
+                            self._hide_loading()
+                        except Exception:
+                            pass
+                        try:
+                            messagebox.showerror("Erro", f"Falha ao carregar dados: {erro}")
+                        except Exception:
+                            pass
+                        return
+
+                    try:
+                        self._finalizar_carregamento_ui(todos_produtos, dados, rows)
+                    except Exception:
+                        traceback.print_exc()
+                        try:
+                            self._hide_loading()
+                        except Exception:
+                            pass
+                except Exception:
+                    traceback.print_exc()
+
+            if not self._safe_after(0, _finish):
+                try:
+                    _finish()
+                except Exception:
+                    traceback.print_exc()
+
+    def _startup_timeout_check(self):
+        """
+        Executado se o carregamento demorar demais.
+        """
+        try:
+            # Se a janela já foi fechada, nada a fazer
+            if getattr(self, "_closed", False):
+                return
+
+            # Se existe o overlay e ele está mapeado (visível), escondemos e avisamos
+            overlay = getattr(self, "loading_overlay", None)
+            if overlay and hasattr(overlay, "winfo_ismapped") and overlay.winfo_ismapped():
+                try:
+                    self._hide_loading()
+                except Exception:
+                    # se algo falhar ao esconder, apenas logamos
+                    traceback.print_exc()
+                try:
+                    messagebox.showwarning(
+                        "Atenção",
+                        "O carregamento demorou mais que o esperado. Verifique a conexão ou tente novamente."
+                    )
+                except Exception:
+                    # se falhar ao exibir a mensagem, logamos e seguimos
+                    traceback.print_exc()
+        except Exception:
+            traceback.print_exc()
+
+    def _finalizar_carregamento_ui(self, todos_produtos, dados, rows=None):
+        try:
+            try:
+                self.todos_produtos = todos_produtos or []
+                self.entrada_produto['values'] = self.todos_produtos
+            except Exception:
+                pass
+
+            try:
+                try:
+                    self.treeview.delete(*self.treeview.get_children())
+                except Exception:
+                    pass
+
+                if rows:
+                    for item in rows:
+                        try:
+                            if isinstance(item, (list, tuple)) and len(item) == 2 and isinstance(item[1], str):
+                                values, tag = item
+                                self.treeview.insert("", "end", values=values, tags=(tag,))
+                            else:
+                                self.treeview.insert("", "end", values=item)
+                        except Exception:
+                            traceback.print_exc()
+                else:
+                    try:
+                        self.calcular_dados(dados)
+                    except Exception:
+                        traceback.print_exc()
+            except Exception:
+                traceback.print_exc()
+        except Exception:
+            traceback.print_exc()
+        finally:
+            try:
+                self._hide_loading()
+            except Exception:
+                pass
+
+    def _animate_loading_dots(self):
+        """
+        Atualiza o texto da label para mostrar 3,2,1 pontos ciclicamente.
+        Agenda a próxima iteração via self.root.after.
+        """
+        try:
+            # se parou, não reagendar
+            if not getattr(self, "_loading_running", False):
+                return
+
+            # calcula próximos pontos
+            try:
+                n_points = self._loading_dots_seq[self._loading_dots_index]
+            except Exception:
+                n_points = 3
+
+            # aplica texto
+            try:
+                dots = "." * n_points
+                self.loading_label.config(text=f"Carregando dados{dots}")
+            except Exception:
+                # se falhar, apenas ignora (mas não corta a animação)
+                traceback.print_exc()
+
+            # avança índice
+            try:
+                self._loading_dots_index = (self._loading_dots_index + 1) % len(self._loading_dots_seq)
+            except Exception:
+                self._loading_dots_index = 0
+
+            # reagenda usando root.after (mais seguro que widget.after)
+            try:
+                # guarda id para possível cancelamento
+                self._loading_dots_after_id = self.root.after(400, self._animate_loading_dots)
+            except Exception:
+                # se não conseguir agendar, desliga a animação para evitar loop infinito
+                self._loading_dots_after_id = None
+                self._loading_running = False
+
+        except Exception:
+            traceback.print_exc()
+
+
+    def _show_loading(self, texto="Carregando dados..."):
+        """Mostra overlay com texto animado e desabilita controles."""
+        try:
+            # aplica texto inicial
+            try:
+                self.loading_label.config(text=texto)
+            except Exception:
+                pass
+
+            # exibe overlay
+            try:
+                self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+                self.loading_overlay.lift()
+            except Exception:
+                pass
+
+            # inicia a animação somente se não estiver rodando
+            try:
+                if not getattr(self, "_loading_running", False):
+                    self._loading_running = True
+                    self._loading_dots_index = 0
+                    # cancela qualquer id antigo por segurança
+                    try:
+                        if getattr(self, "_loading_dots_after_id", None):
+                            try:
+                                self.root.after_cancel(self._loading_dots_after_id)
+                            except Exception:
+                                pass
+                            self._loading_dots_after_id = None
+                    except Exception:
+                        pass
+                    # agenda a primeira chamada imediatamente (pequeno delay para UI)
+                    try:
+                        self._loading_dots_after_id = self.root.after(200, self._animate_loading_dots)
+                    except Exception:
+                        self._loading_dots_after_id = None
+            except Exception:
+                traceback.print_exc()
+
+            # desabilita controles
+            controles = [
+                getattr(self, "botao_atualizar", None),
+                getattr(self, "botao_atualizar_custo_manual", None),
+                getattr(self, "botao_notificacao", None),
+                getattr(self, "botao_voltar", None),
+                getattr(self, "botao_pesquisar", None),
+                getattr(self, "botao_limpar_pesquisa", None),
+                getattr(self, "botao_exportar_excel", None)
+            ]
+            for w in controles:
+                try:
+                    if w: w.config(state="disabled")
+                except Exception:
+                    pass
+            try: self.entrada_produto.config(state="disabled")
+            except Exception: pass
+            try: self.entrada_pesquisa.config(state="disabled")
+            except Exception: pass
+
+        except Exception:
+            traceback.print_exc()
+
+
+    def _hide_loading(self):
+        """Para a animação, esconde o overlay e reabilita controles."""
+        try:
+            # para a animação e cancela after
+            try:
+                self._loading_running = False
+                if getattr(self, "_loading_dots_after_id", None):
+                    try:
+                        self.root.after_cancel(self._loading_dots_after_id)
+                    except Exception:
+                        pass
+                    self._loading_dots_after_id = None
+            except Exception:
+                pass
+
+            # esconde overlay
+            try:
+                self.loading_overlay.place_forget()
+            except Exception:
+                pass
+
+            # reabilita controles
+            controles = [
+                getattr(self, "botao_atualizar", None),
+                getattr(self, "botao_atualizar_custo_manual", None),
+                getattr(self, "botao_notificacao", None),
+                getattr(self, "botao_voltar", None),
+                getattr(self, "botao_pesquisar", None),
+                getattr(self, "botao_limpar_pesquisa", None),
+                getattr(self, "botao_exportar_excel", None)
+            ]
+            for w in controles:
+                try:
+                    if w: w.config(state="normal")
+                except Exception:
+                    pass
+            try: self.entrada_produto.config(state="normal")
+            except Exception: pass
+            try: self.entrada_pesquisa.config(state="normal")
+            except Exception: pass
+
+        except Exception:
             traceback.print_exc()
 
     def atualizar_treeview(self):
@@ -718,12 +1036,37 @@ class CalculoProduto:
         conn.close()
         return resultados
 
-    def carregar_dados_iniciais(self):
-        self.todos_produtos = self.carregar_nomes_produtos()
-        self.entrada_produto['values'] = self.todos_produtos
-        self.atualizar_treeview()
-        # Atualiza automaticamente o custo total sem intervenção do usuário
-        self.atualizar_custo_total()
+    def _carregar_inicial_em_background(self):
+        """
+        Carrega nomes de produto e dados em background, SEM tocar widgets.
+        Quando pronto, agenda no main thread a chamada que atualiza a UI.
+        """
+        try:
+            todos_produtos = []
+            dados = []
+            try:
+                todos_produtos = self.carregar_nomes_produtos() or []
+            except Exception:
+                traceback.print_exc()
+                todos_produtos = []
+
+            try:
+                dados = self.carregar_dados() or []
+            except Exception:
+                traceback.print_exc()
+                dados = []
+
+            # agenda atualização de UI no main thread (seguro)
+            try:
+                self.root.after(0, lambda: self._finalizar_carregamento_ui(todos_produtos, dados))
+            except Exception:
+                # fallback (menos seguro) — tenta executar diretamente
+                try:
+                    self._finalizar_carregamento_ui(todos_produtos, dados)
+                except Exception:
+                    traceback.print_exc()
+        except Exception:
+            traceback.print_exc()
 
     def calcular_dados(self, resultados):
             """

@@ -80,6 +80,37 @@ class RegistroTeste(tk.Toplevel):
         # Botão Exportar Excel
         tk.Button(search_frame, text="Exportar Excel", command=self.abrir_dialogo_exportacao, width=15)\
             .pack(side="right")
+        
+         # --- Botão de Ajuda discreto (❓) ---
+        self.botao_ajuda = tk.Button(
+            search_frame,
+            text="❓",
+            fg="white",
+            bg="#2c3e50",
+            font=("Segoe UI", 10, "bold"),
+            bd=0,
+            relief="flat",
+            width=3,
+            command=self._abrir_ajuda_registro_modal
+        )
+        self.botao_ajuda.pack(side=tk.RIGHT, padx=6, pady=10)
+
+        # efeito hover
+        self.botao_ajuda.bind("<Enter>", lambda e: self.botao_ajuda.config(bg="#3b5566"))
+        self.botao_ajuda.bind("<Leave>", lambda e: self.botao_ajuda.config(bg="#2c3e50"))
+
+        # Atalho F1 para abrir ajuda (quando esta janela estiver ativa)
+        try:
+            self.bind("<F1>", lambda e: self._abrir_ajuda_registro_modal())
+        except Exception:
+            pass
+
+        # Tooltip (se desejar hover)
+        try:
+            if hasattr(self, "_create_tooltip"):
+                self._create_tooltip(self.botao_ajuda, "Ajuda — Registro Teste (F1)")
+        except Exception:
+            pass
 
         # Formulário
         form = tk.LabelFrame(main, text="Dados do Registro", bg="#f4f4f4", padx=10, pady=10)
@@ -200,6 +231,300 @@ class RegistroTeste(tk.Toplevel):
             self._filter_rows("")  # exibe tudo novamente
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao atualizar: {e}")
+
+    def _create_tooltip(self, widget, text, delay=450):
+        """Tooltip com quebra de linha automática e ajuste para não sair da tela."""
+        tooltip = {"win": None, "after_id": None}
+
+        def show():
+            if tooltip["win"] or not widget.winfo_exists():
+                return
+
+            # cria janela do tooltip
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+
+            # label com wrap para quebrar linhas
+            label = tk.Label(
+                win,
+                text=text,
+                bg="#333333",
+                fg="white",
+                font=("Segoe UI", 9),
+                bd=0,
+                padx=6,
+                pady=4,
+                wraplength=300  # máx. largura do tooltip (pixels)
+            )
+            label.pack()
+
+            # calcula posição inicial
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+
+            # força update para medir o tamanho real
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+
+            # limites da tela
+            screen_w = win.winfo_screenwidth()
+            screen_h = win.winfo_screenheight()
+
+            # ajusta posição horizontal se ultrapassar borda direita
+            if x + w > screen_w:
+                x = screen_w - w - 10
+            if x < 0:
+                x = 10
+
+            # ajusta posição vertical se ultrapassar borda inferior
+            if y + h > screen_h:
+                y = widget.winfo_rooty() - h - 6  # mostra acima do widget
+
+            win.geometry(f"+{x}+{y}")
+            tooltip["win"] = win
+
+        def hide():
+            if tooltip["after_id"]:
+                try:
+                    widget.after_cancel(tooltip["after_id"])
+                except Exception:
+                    pass
+                tooltip["after_id"] = None
+            if tooltip["win"]:
+                try:
+                    tooltip["win"].destroy()
+                except Exception:
+                    pass
+                tooltip["win"] = None
+
+        def schedule_show(e=None):
+            tooltip["after_id"] = widget.after(delay, show)
+
+        widget.bind("<Enter>", schedule_show)
+        widget.bind("<Leave>", lambda e: hide())
+        widget.bind("<ButtonPress>", lambda e: hide())
+
+    def _abrir_ajuda_registro_modal(self, contexto=None):
+        """Modal de Ajuda para Registro de Teste — versão estilizada (layout com navegação + painéis)."""
+        try:
+            modal = tk.Toplevel(self)
+            modal.title("Ajuda — Registro de Teste")
+            modal.transient(self)
+            modal.grab_set()
+            modal.configure(bg="white")
+
+            # Dimensões / centralização
+            w, h = 920, 680
+            x = max(0, (modal.winfo_screenwidth() // 2) - (w // 2))
+            y = max(0, (modal.winfo_screenheight() // 2) - (h // 2))
+            modal.geometry(f"{w}x{h}+{x}+{y}")
+            modal.minsize(760, 480)
+
+            # Ícone (silencioso se falhar)
+            try:
+                # tenta usar caminho de ícone da instância, se existir; senão ignora
+                ic = getattr(self, "caminho_icone", r"C:\Sistema\logos\Kametal.ico")
+                aplicar_icone(modal, ic)
+            except Exception:
+                pass
+
+            # Cabeçalho do modal
+            header = tk.Frame(modal, bg="#2b3e50", height=64)
+            header.pack(side="top", fill="x")
+            header.pack_propagate(False)
+            tk.Label(header, text="Ajuda — Registro de Teste", bg="#2b3e50", fg="white",
+                    font=("Segoe UI", 16, "bold")).pack(side="left", padx=16)
+            tk.Label(header, text="F1 abre esta ajuda — Esc fecha", bg="#2b3e50",
+                    fg="#cbd7e6", font=("Segoe UI", 10)).pack(side="left", padx=8, pady=10)
+
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+
+            # Corpo: navegação à esquerda + conteúdo à direita
+            body = tk.Frame(modal, bg="white")
+            body.pack(fill="both", expand=True, padx=14, pady=12)
+
+            nav_frame = tk.Frame(body, width=260, bg="#f6f8fa")
+            nav_frame.pack(side="left", fill="y", padx=(0, 12), pady=2)
+            nav_frame.pack_propagate(False)
+            tk.Label(nav_frame, text="Seções", bg="#f6f8fa", font=("Segoe UI", 10, "bold"))\
+                .pack(anchor="nw", pady=(10, 6), padx=12)
+
+            sections = [
+                "Visão Geral",
+                "Salvar / Editar / Excluir / Limpar",
+                "Entradas e Formatação",
+                "Área & L.R. Tração (Cálculos automáticos)",
+                "Alongamento (%)",
+                "Tempera (normalização)",
+                "Pesquisa",
+                "Exportação (Excel)",
+                "FAQ"
+            ]
+
+            listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
+                                font=("Segoe UI", 10), selectmode="browse", exportselection=False,
+                                bg="#ffffff")
+            for s in sections:
+                listbox.insert("end", s)
+            listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+            # --- Content area (usa grid + tkraise para estabilidade) ---
+            content_frame = tk.Frame(body, bg="white")
+            content_frame.pack(side="right", fill="both", expand=True)
+            content_frame.rowconfigure(0, weight=1)
+            content_frame.columnconfigure(0, weight=1)
+
+            # Painel geral
+            general_frame = tk.Frame(content_frame, bg="white")
+            general_frame.grid(row=0, column=0, sticky="nsew")
+            general_frame.rowconfigure(0, weight=1)
+            general_frame.columnconfigure(0, weight=1)
+
+            txt_general = tk.Text(general_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_general = tk.Scrollbar(general_frame, command=txt_general.yview)
+            txt_general.configure(yscrollcommand=sb_general.set)
+            txt_general.grid(row=0, column=0, sticky="nsew")
+            sb_general.grid(row=0, column=1, sticky="ns")
+
+            # Painel dedicado para Entradas (com scrollbar própria)
+            entradas_frame = tk.Frame(content_frame, bg="white")
+            entradas_frame.grid(row=0, column=0, sticky="nsew")
+            entradas_frame.rowconfigure(0, weight=1)
+            entradas_frame.columnconfigure(0, weight=1)
+
+            txt_entradas = tk.Text(entradas_frame, wrap="word", font=("Segoe UI", 11), bd=0, padx=12, pady=12)
+            sb_entradas = tk.Scrollbar(entradas_frame, command=txt_entradas.yview)
+            txt_entradas.configure(yscrollcommand=sb_entradas.set)
+            txt_entradas.grid(row=0, column=0, sticky="nsew")
+            sb_entradas.grid(row=0, column=1, sticky="ns")
+
+            # Conteúdos
+            contents = {}
+
+            contents["Visão Geral"] = (
+                "Visão Geral\n\n"
+                "Tela Registro de Teste — registre ensaios com Data, Dimensões, Área, L.R. Tração (N/MPa), Alongamento, Tempera, Máquina e Empresa.\n"
+                "Use os botões para Salvar, Alterar, Excluir e Limpar. A lista (Treeview) mostra os registros; selecione uma linha para carregar no formulário."
+            )
+
+            contents["Salvar / Editar / Excluir / Limpar"] = (
+                "Salvar / Editar / Excluir / Limpar\n\n"
+                "- Salvar: preencha os campos (Data, Dimensões, L.R. Tração (N), etc.) e clique em 'Salvar'.\n"
+                "- Editar (Alterar): selecione um registro na tabela; os campos serão preenchidos. Altere o que for necessário e clique em 'Alterar' para persistir.\n"
+                "- Excluir: selecione um ou mais registros e clique em 'Excluir'. Confirme para remover do banco.\n"
+                "- Limpar: limpa todos os campos do formulário (não apaga registros salvos no banco).\n\n"
+                "Observação: operações críticas (Excluir/Alterar) devem pedir confirmação — mantenha sempre backup antes de operações em lote."
+            )
+
+            contents["Entradas e Formatação"] = (
+                "Entradas e Formatação — regras e exemplos\n\n"
+                "- Data: não é necessário digitar barras. Digite apenas dígitos: ex.: '01012025' → será formatado como '01/01/2025'.\n\n"
+                "- Dimensões: digite apenas dígitos (sem vírgula). A formatação interna converte para valor com casas decimais quando necessário.\n"
+                "  Exemplo: se o campo espera 2 casas decimais, digitar '12345' pode resultar em '123,45'.\n\n"
+                "- Valores numéricos (Área, L.R. Tração, etc.): NÃO digite vírgula manualmente — digite só dígitos; o sistema aplica a vírgula/decimais automaticamente.\n"
+                "  Você também pode colar valores já formatados; verifique o campo antes de salvar.\n\n"
+                "- Campos em AMARELO (Área e L.R. Tração (MPa)) indicam campos calculados automaticamente (veja seção específica)."
+            )
+
+            contents["Área & L.R. Tração (Cálculos automáticos)"] = (
+                "Área e L.R. Tração — cálculo automático e comportamento\n\n"
+                "- Cálculo de Área:\n"
+                "  • A área é calculada automaticamente a partir de Dimensões quando possível. Fórmula utilizada (exemplo para seção circular):\n"
+                "    area = dimensao * dimensao * 0.7854  (π/4 ≈ 0.7854)\n"
+                "  • O campo 'Área' é exibido em AMARELO para indicar que é um campo derivado.\n\n"
+                "- Cálculo de L.R. Tração (MPa):\n"
+                "  • L.R. Tração (MPa) = L.R. Tração (N) ÷ Área\n"
+                "  • O campo 'L.R. Tração (MPa)' também aparece em AMARELO e é recalculado sempre que Dimensões ou L.R. Tração (N) mudam.\n\n"
+                "- Comportamento e edição manual:\n"
+                "  • Você pode apagar o valor automático, digitar um número manualmente ou deixar em branco — o sistema não irá quebrar.\n"
+                "  • Depois de editar manualmente, dupla-clique no campo (Área ou L.R. Tração (MPa)) para restaurar o cálculo automático.\n"
+                "  • Por isso os campos aparecem em amarelo: alertar o usuário que são calculados, mas editáveis."
+            )
+
+            contents["Alongamento (%)"] = (
+                "Alongamento (%)\n\n"
+                "- Não digite o símbolo '%' na entrada de Alongamento. Digite apenas o número (ex.: '12'). O sistema apresentará '12%' automaticamente.\n"
+                "- O campo aceita valores vazios e entradas manuais; formatará o valor ao perder o foco."
+            )
+
+            contents["Tempera (normalização)"] = (
+                "Tempera — normalização de texto\n\n"
+                "- Ao digitar no campo 'Tempera', o sistema aplica normalizações automáticas para palavras conhecidas.\n"
+                "- Algumas palavras/abreviações são expandidas e a palavra 'Duro' é adicionada automaticamente quando apropriado (ex.: ao digitar certas siglas ou palavras-chave o sistema pode inserir ' Duro' no final).\n"
+                "- Se quiser evitar a adição automática, digite o texto completo desejado explicitamente (o sistema tentará normalizar, mas o texto manual prevalece)."
+            )
+
+            contents["Pesquisa"] = (
+                "Pesquisa — como usar\n\n"
+                "- O campo 'Pesquisar' filtra a lista (Treeview) ao digitar: você pode pesquisar por Data, Código de Barras, O.P., Cliente, Material, Máquina, Empresa, etc.\n"
+                "- Para busca por data exata, digite com '/' (ex.: '01/01/2025') ou digite apenas números para busca por substring ('01012025').\n"
+                "- A pesquisa é incremental; apague o texto para voltar à listagem completa."
+            )
+
+            contents["Exportação (Excel)"] = (
+                "Exportação (Excel)\n\n"
+                "- Clique em 'Exportar Excel' para abrir o diálogo de exportação.\n"
+                "- Você pode escolher filtros: Data inicial / Data final e filtros textuais (O.P., Cliente, Material, Máquina, Empresa).\n"
+                "- O arquivo .xlsx gerado conterá colunas com Data, Dimensões, Área, L.R. Tração (N), L.R. Tração (MPa), Alongamento (%), Tempera, Máquina e Empresa.\n"
+                "- Antes de exportar, confirme que os campos calculados estão como deseja (área/l.r. tração), pois os valores exportados são os mostrados na interface."
+            )
+
+            contents["FAQ"] = (
+                "FAQ — Perguntas rápidas\n\n"
+                "Q: Posso deixar campos calculados em branco?\n"
+                "A: Sim — o sistema aceita; se os dados de entrada estiverem disponíveis (ex.: Dimensões) o cálculo automático é refeito.\n\n"
+                "Q: Posso editar manualmente valores calculados?\n"
+                "A: Sim — campos em amarelo são editáveis. Duplo-clique para restaurar o cálculo automático.\n\n"
+                "Q: Tempera sempre terá 'Duro' adicionado?\n"
+                "A: O sistema adiciona 'Duro' em casos onde a normalização do texto determinar que faz sentido. Você pode substituir manualmente o texto."
+            )
+
+            # Função que mostra a seção correta (usa tkraise para alternar painéis)
+            def mostrar_secao(key):
+                if key == "Entradas e Formatação":
+                    txt_entradas.configure(state="normal")
+                    txt_entradas.delete("1.0", "end")
+                    txt_entradas.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_entradas.configure(state="disabled")
+                    txt_entradas.yview_moveto(0)
+                    entradas_frame.tkraise()
+                else:
+                    txt_general.configure(state="normal")
+                    txt_general.delete("1.0", "end")
+                    txt_general.insert("1.0", contents.get(key, "Conteúdo não disponível."))
+                    txt_general.configure(state="disabled")
+                    txt_general.yview_moveto(0)
+                    general_frame.tkraise()
+
+            # Inicializa exibindo a primeira seção
+            listbox.selection_set(0)
+            mostrar_secao(sections[0])
+
+            def on_select(evt):
+                sel = listbox.curselection()
+                if sel:
+                    mostrar_secao(sections[sel[0]])
+
+            listbox.bind("<<ListboxSelect>>", on_select)
+
+            # Rodapé e Fechar (botão estiloso)
+            ttk.Separator(modal, orient="horizontal").pack(fill="x")
+            rodape = tk.Frame(modal, bg="white")
+            rodape.pack(side="bottom", fill="x", padx=12, pady=10)
+            btn_close = tk.Button(rodape, text="Fechar", bg="#34495e", fg="white",
+                                bd=0, padx=12, pady=8, command=modal.destroy)
+            btn_close.pack(side="right", padx=6)
+
+            modal.bind("<Escape>", lambda e: modal.destroy())
+            modal.focus_set()
+            modal.wait_window()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print("Erro ao abrir modal de ajuda (Registro de Teste):", e)
+
 
     def abrir_dialogo_exportacao(self):
         dialogo = tk.Toplevel(self)
