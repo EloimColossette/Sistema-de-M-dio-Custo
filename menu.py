@@ -215,9 +215,168 @@ class Janela_Menu(tk.Tk):
 
         # bind global apenas para a sidebar (não deve competir com outros widgets)
         self.sidebar_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+      
+    def criar_botao_redondo(self, master, comando=None, texto="❓", raio=14,
+                        bg="#2c3e50", fg="white",
+                        hover_enter_callback=None, hover_leave_callback=None):
+        """
+        Botão redondo com animações:
+        - hover: cresce levemente e mostra sombra
+        - click: ripple + callback
+        - teclado: suporta Tab/Enter/Space e anel de foco
+        Retorna: Canvas (widget)
+        """
+        # estado e parâmetros
+        base_raio = raio
+        max_raio = int(raio * 1.14)   # até quanto cresce no hover
+        speed_ms = 15                 # intervalo de animação (menor = mais suave)
+        step = 1                      # pixels por frame
+        current_raio = base_raio
+        anim_id = {"hover": None, "ripple": None}
 
+        # canvas com mesmo bg do pai para integrar visual
+        canvas = tk.Canvas(master, width=(max_raio*2)+8, height=(max_raio*2)+8,
+                        highlightthickness=0, bg=master["bg"], bd=0, relief="flat", takefocus=1, cursor="hand2")
 
-        
+        cx = (max_raio + 4)
+        cy = (max_raio + 4)
+
+        # shadow (atrás, ligeiramente deslocada para baixo)
+        shadow_offset = 2
+        shadow_color = "#172029"
+        shadow_id = canvas.create_oval(cx-base_raio+shadow_offset, cy-base_raio+shadow_offset,
+                                    cx+base_raio+shadow_offset, cy+base_raio+shadow_offset,
+                                    fill=shadow_color, outline=shadow_color)
+
+        # círculo principal
+        oval_id = canvas.create_oval(cx-base_raio, cy-base_raio, cx+base_raio, cy+base_raio,
+                                    fill=bg, outline=bg)
+        text_id = canvas.create_text(cx, cy, text=texto, fill=fg, font=("Helvetica", max(10, int(base_raio*0.9)), "bold"))
+
+        # anel de foco (invisível até focus)
+        focus_id = canvas.create_oval(cx-base_raio-6, cy-base_raio-6, cx+base_raio+6, cy+base_raio+6,
+                                    outline="", width=2, dash=(3, 4))
+
+        # helpers para redesenhar (muda coords e fonte conforme raio)
+        def _desenhar(raio_atual):
+            # atualiza shadow, oval, texto, focus ring
+            canvas.coords(shadow_id,
+                        cx-raio_atual+shadow_offset, cy-raio_atual+shadow_offset,
+                        cx+raio_atual+shadow_offset, cy+raio_atual+shadow_offset)
+            canvas.coords(oval_id,
+                        cx-raio_atual, cy-raio_atual,
+                        cx+raio_atual, cy+raio_atual)
+            canvas.coords(text_id,
+                        cx, cy)
+            # fonte proporcional (inteiro)
+            fsize = max(8, int(raio_atual * 0.9))
+            canvas.itemconfig(text_id, font=("Helvetica", fsize, "bold"))
+            canvas.coords(focus_id,
+                        cx-raio_atual-6, cy-raio_atual-6,
+                        cx+raio_atual+6, cy+raio_atual+6)
+
+        # animação de hover: expandir/contrair suavemente
+        def _animate_hover(target):
+            # cancela animação anterior (se houver)
+            if anim_id["hover"]:
+                canvas.after_cancel(anim_id["hover"])
+                anim_id["hover"] = None
+
+            def step_fn():
+                nonlocal current_raio
+                if current_raio == target:
+                    anim_id["hover"] = None
+                    return
+                # aproxima-se do target
+                if current_raio < target:
+                    current_raio = min(target, current_raio + step)
+                else:
+                    current_raio = max(target, current_raio - step)
+                _desenhar(current_raio)
+                anim_id["hover"] = canvas.after(speed_ms, step_fn)
+
+            step_fn()
+
+        # ripple ao clicar: cria um anel que cresce e some
+        def _ripple():
+            rip_id = canvas.create_oval(cx, cy, cx, cy, outline="#ffffff", width=2)
+            max_r = int(base_raio * 2.4)
+            frames = 10
+            frame = {"i": 0}
+
+            def ripple_step():
+                frame["i"] += 1
+                t = frame["i"] / frames
+                r = int(base_raio + t * (max_r - base_raio))
+                canvas.coords(rip_id, cx - r, cy - r, cx + r, cy + r)
+                # reduz opacidade simulando trocando cor por tons (simples) -> aqui usa cinza claro progressivo
+                alpha_val = int(220 * (1 - t))  # 220..0
+                # transforma em hex (não alpha real) para simular fade
+                hex_gray = f"#{alpha_val:02x}{alpha_val:02x}{alpha_val:02x}"
+                canvas.itemconfig(rip_id, outline=hex_gray)
+                if frame["i"] < frames:
+                    anim_id["ripple"] = canvas.after(30, ripple_step)
+                else:
+                    canvas.delete(rip_id)
+                    anim_id["ripple"] = None
+
+            ripple_step()
+
+        # eventos
+        def _on_enter(evt=None):
+            # cresce e ressalta
+            _animate_hover(max_raio)
+            # leve escurecimento do oval para indicar hover
+            canvas.itemconfig(oval_id, fill="#374e60", outline="#374e60")
+            # optional callback
+            if callable(hover_enter_callback):
+                try:
+                    hover_enter_callback()
+                except Exception:
+                    pass
+
+        def _on_leave(evt=None):
+            _animate_hover(base_raio)
+            canvas.itemconfig(oval_id, fill=bg, outline=bg)
+            if callable(hover_leave_callback):
+                try:
+                    hover_leave_callback()
+                except Exception:
+                    pass
+
+        def _on_click(evt=None):
+            # ripple visual e comando
+            _ripple()
+            # press visual rápido (um contorno branco que some)
+            canvas.itemconfig(oval_id, outline="#ffffff")
+            canvas.after(90, lambda: canvas.itemconfig(oval_id, outline=bg))
+            if callable(comando):
+                try:
+                    comando()
+                except Exception:
+                    # não deixar animação travar por exceção
+                    pass
+
+        # foco por teclado: mostra anel
+        def _on_focus_in(evt=None):
+            canvas.itemconfig(focus_id, outline="#ffffff")
+        def _on_focus_out(evt=None):
+            canvas.itemconfig(focus_id, outline="")
+
+        # binds
+        canvas.bind("<Enter>", lambda e: _on_enter(e))
+        canvas.bind("<Leave>", lambda e: _on_leave(e))
+        canvas.bind("<Button-1>", lambda e: _on_click(e))
+        canvas.bind("<Return>", lambda e: _on_click(e))
+        canvas.bind("<space>", lambda e: _on_click(e))
+        canvas.bind("<FocusIn>", lambda e: _on_focus_in(e))
+        canvas.bind("<FocusOut>", lambda e: _on_focus_out(e))
+
+        # inicial desenha
+        _desenhar(current_raio)
+
+        return canvas
+
     def _criar_cabecalho(self):
         """Cria o cabeçalho com a data, hora, título e botões à direita."""
         self.cabecalho = tk.Frame(self, bg="#34495e", height=80)
@@ -258,28 +417,24 @@ class Janela_Menu(tk.Tk):
         self.botao_atualizar.bind("<Leave>", lambda e: self.botao_atualizar.config(bg="#2980b9"))
         self.botao_atualizar.pack(side="right", padx=(8, 0))
 
-        # Botão Ajuda (profissional, com tooltip e atalho F1)
+       # Botão Ajuda (profissional, com tooltip e atalho F1)
         self.help_frame = tk.Frame(self.right_frame, bg="#34495e")
         self.help_frame.pack(side="right", padx=(6, 4))
 
-        self.botao_ajuda = tk.Button(
+        self.botao_ajuda = self.criar_botao_redondo(
             self.help_frame,
-            text="❓",
-            fg="white",
+            comando=self._abrir_ajuda_modal,
+            texto="❓",
+            raio=14,
             bg="#2c3e50",
-            font=("Helvetica", 12, "bold"),
-            bd=0,
-            relief="flat",
-            width=3,
-            command=lambda: self._abrir_ajuda_modal()
+            fg="white",
+            hover_enter_callback=lambda: None,  # opcional: passe algo se quiser executar
+            hover_leave_callback=lambda: None
         )
-        # efeitos ao passar o mouse (consistente com o resto)
-        self.botao_ajuda.bind("<Enter>", lambda e: self.botao_ajuda.config(bg="#3b5566"))
-        self.botao_ajuda.bind("<Leave>", lambda e: self.botao_ajuda.config(bg="#2c3e50"))
         self.botao_ajuda.pack(side="right", padx=(0, 6))
 
-        # Tooltip acessível (texto curto)
         try:
+            # seu _create_tooltip deve aceitar o canvas; se não aceitar, adapte para usar widget=canvas
             self._create_tooltip(self.botao_ajuda, "Ajuda (F1)")
         except Exception:
             pass
