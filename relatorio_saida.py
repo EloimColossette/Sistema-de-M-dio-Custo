@@ -367,8 +367,7 @@ class RelatorioApp(tk.Toplevel):  # Herda de Toplevel
                 "2. Clique em 'Gerar Relatório' para carregar os dados na Treeview.\n"
                 "3. Use 'Pesquisar' para filtrar os resultados já carregados (filtro local).\n"
                 "4. Use 'Calcular Totais' para visualizar somas/medias; 'Editar Estoque' para ajustes locais; 'Enviar para Resumo' para consolidar.\n\n"
-                "Observação: a janela de Resumo serve como painel consolidado — pense nela como a visão\n"
-                "final antes de exportar para contabilidade ou enviar resumos por e-mail/PDF."
+                "Observação: a janela de Resumo serve como painel consolidado — pense nela como a visão final antes de exportar para contabilidade ou enviar resumos por e-mail/PDF."
             )
 
             # Relatório de Saída: inclui a nota sobre digitar data sem barra (o sistema formata automaticamente)

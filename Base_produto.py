@@ -385,8 +385,8 @@ class InterfaceProduto:
 
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
-                "A janela 'Base de Produtos' é o catálogo central dos produtos da empresa. "
-                "Aqui você cadastra o nome do produto e as porcentagens de cobre e zinco que o compõem. "
+                "A janela 'Base de Produtos' é o catálogo central dos produtos da empresa.\n"
+                "Aqui você cadastra o nome do produto e as porcentagens de cobre e zinco que o compõem.\n"
                 "A Treeview lista os produtos; selecione um item para carregar seus dados nos campos acima."
             )
 
@@ -417,8 +417,7 @@ class InterfaceProduto:
                 "Excluir Produto — Passo a passo\n\n"
                 "1) Selecione um ou mais produtos na Treeview.\n"
                 "2) Clique em 'Excluir' e confirme a ação na caixa de diálogo.\n"
-                "3) O sistema executa DELETE por ID e notifica o canal de atualização (NOTIFY) para recarregar\n"
-                "   outros relatórios/painéis quando aplicável.\n\n"
+                "3) O sistema executa DELETE por ID e notifica o canal de atualização (NOTIFY) para recarregar outros relatórios/painéis quando aplicável.\n\n"
                 "Recomendações:\n"
                 " - Faça backup antes de operações em lote.\n"
                 " - Considere desativar em vez de excluir se precisar manter histórico."
@@ -428,8 +427,7 @@ class InterfaceProduto:
                 "Botão Limpar — comportamento\n\n"
                 " - Ao clicar em 'Limpar', todos os campos de entrada acima são esvaziados.\n"
                 " - Use o botão quando quiser iniciar cadastro de novo produto ou cancelar edição.\n"
-                " - O botão não altera o banco, apenas limpa a interface. Após limpar, o item selecionado na\n"
-                "   Treeview permanece selecionado até que você selecione outro."
+                " - O botão não altera o banco, apenas limpa a interface. Após limpar, o item selecionado na Treeview permanece selecionado até que você selecione outro."
             )
 
             contents["Exportar Excel / PDF"] = (

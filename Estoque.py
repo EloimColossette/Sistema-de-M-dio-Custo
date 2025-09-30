@@ -487,7 +487,6 @@ class CalculoProduto:
         except Exception:
             traceback.print_exc()
 
-
     def _show_loading(self, texto="Carregando dados..."):
         """Mostra overlay com texto animado e desabilita controles."""
         try:
@@ -549,7 +548,6 @@ class CalculoProduto:
 
         except Exception:
             traceback.print_exc()
-
 
     def _hide_loading(self):
         """Para a animação, esconde o overlay e reabilita controles."""
@@ -853,8 +851,7 @@ class CalculoProduto:
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
                 "Esta tela permite ajustar manualmente o estoque com base nas NFs de entrada e acompanhar o histórico dessas alterações. "
-                "Use os controles acima (produto, valor do peso e operação) para executar alterações rápidas; use 'Atualizar Custo Manual' "
-                "para corrigir o custo de uma NF específica.\n"
+                "Use os controles acima (produto, valor do peso e operação) para executar alterações rápidas; use 'Atualizar Custo Manual' para corrigir o custo de uma NF específica.\n"
             )
 
             contents["Produto (lista suspensa)"] = (
@@ -873,10 +870,8 @@ class CalculoProduto:
 
             contents["Operação (Adicionar/Subtrair)"] = (
                 "Operação — o que acontece\n\n"
-                " • 'Subtrair': o sistema irá buscar as NFs mais antigas (FIFO) e subtrair a quantidade informada delas, respeitando o estoque disponível em cada NF.\n"
-                "   Se o valor informado for maior que o disponível na NF atual, o sistema continuará buscando nas próximas NFs (ordem por data/número).\n\n"
-                " • 'Adicionar': o sistema procura NFs mais recentes e tenta adicionar o valor informado nelas (até que o peso líquido da NF seja atingido). "
-                "Se não houver espaço suficiente em NFs existentes, o sistema avisará sobre o restante que não pôde ser alocado.\n"
+                " • 'Subtrair': o sistema irá buscar as NFs mais antigas (FIFO) e subtrair a quantidade informada delas, respeitando o estoque disponível em cada NF. Se o valor informado for maior que o disponível na NF atual, o sistema continuará buscando nas próximas NFs (ordem por data/número).\n"
+                " • 'Adicionar': o sistema procura NFs mais recentes e tenta adicionar o valor informado nelas (até que o peso líquido da NF seja atingido). Se não houver espaço suficiente em NFs existentes, o sistema avisará sobre o restante que não pôde ser alocado.\n"
             )
 
             contents["Botão Calcular (Comportamento)"] = (

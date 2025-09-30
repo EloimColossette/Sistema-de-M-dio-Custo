@@ -372,9 +372,7 @@ class InterfaceUsuarios:
 
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
-                "A tela de Usuários permite criar, editar, remover usuários e atribuir permissões "
-                "a funcionalidades (janelas) do sistema. A interface apresenta campos (Nome, Usuário, Senha), "
-                "uma lista (Treeview) com os usuários existentes e botões para ações."
+                "A tela de Usuários permite criar, editar, remover usuários e atribuir permissões a funcionalidades (janelas) do sistema. A interface apresenta campos (Nome, Usuário, Senha), uma lista (Treeview) com os usuários existentes e botões para ações."
             )
 
             contents["Como Adicionar Usuário"] = (

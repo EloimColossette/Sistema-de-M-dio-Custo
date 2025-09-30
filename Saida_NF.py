@@ -464,7 +464,8 @@ class SistemaNF(tk.Toplevel):
                 "Visão Geral\n\n"
                 "Tela de Saída de NF: registre notas fiscais e seus produtos (nome, peso e base do produto). "
                 "A Treeview mostra cada produto em sua própria linha. Use os botões para salvar, alterar, excluir e limpar.\n\n"
-                "Fluxo típico: adicione produtos → verifique a soma dos pesos → salve a NF (persistência no banco)."
+                "Fluxo típico: adicione produtos → verifique a soma dos pesos → salve a NF (persistência no banco).\n\n"
+                "LEMBRETE IMPORTANTE: após salvar a NF na tela Saída NF, abra a janela 'Cálculo NFs' para ajustar/remover o peso correspondente do estoque. A Saída NF não subtrai automaticamente o estoque — isso deve ser feito na tela de cálculo de NFs para manter o inventário correto."
             )
 
             contents["Adicionar NF"] = (
@@ -476,7 +477,7 @@ class SistemaNF(tk.Toplevel):
                 "2) Na seção 'Adicionar Produtos', selecione/insira Produto, informe Peso e escolha Base Produto.\n"
                 "   - Peso: não é preciso digitar vírgulas. Ex.: '12345' será formatado para '123,45' pelo formatador automático.\n\n"
                 "3) Clique em 'Adicionar Produto' para inserir o produto na lista temporária da NF. "
-                "Você pode repetir esse passo quantas vezes forem necessárias: **mais de um produto pode ser adicionado à mesma NF** — "
+                "Você pode repetir esse passo quantas vezes forem necessárias: mais de um produto pode ser adicionado à mesma NF — "
                 "cada produto virará uma linha na lista/Treeview vinculada ao mesmo número de NF.\n\n"
                 "4) Quando terminar de adicionar os produtos desejados, clique em 'Salvar NF' para gravar a nota e todos os seus produtos no banco.\n\n"
                 "Observação sobre Base Produto:\n"
@@ -485,13 +486,20 @@ class SistemaNF(tk.Toplevel):
                 "Dicas rápidas de formatação (Data / CNPJ/CPF / Peso):\n"
                 " - Data: você pode digitar somente os números; o sistema formata para DD/MM/AAAA automaticamente.\n"
                 " - CNPJ/CPF: digite apenas os dígitos (sem pontos, barras ou traços); se o cliente já estiver cadastrado, o nome será preenchido automaticamente.\n"
-                " - Peso: digite somente números (ex.: '2500') e o campo será formatado para '25,00'. Você também pode digitar com vírgula ('25,00') se preferir.\n"
+                " - Peso: digite somente números (ex.: '2500') e o campo será formatado para '25,00'. Você também pode digitar com vírgula ('25,00') se preferir.\n\n"
+                "AVISO IMPORTANTE — ATUALIZAÇÃO DE ESTOQUE:\n"
+                " - Depois de salvar a NF nesta tela, NÃO esqueça de abrir a janela 'Cálculo NFs' e subtrair o peso correspondente do estoque.\n"
+                "A Saída NF registra a nota e os produtos, mas a redução física/contábil do estoque deve ser feita via 'Cálculo NFs' para que o inventário seja atualizado corretamente.\n"
+                " - Passos rápidos:\n"
+                "    1) Abra 'Cálculo NFs'.\n"
+                "    2) Localize a base produto na lista suspensa.\n"
+                "    3) Retire (subtraia) o valor do peso do estoque e confirme.\n"
             )
 
             contents["Editar NF"] = (
                 "Editar NF — Passo a passo\n\n"
                 "1) Selecione a linha (um produto/registro) na Treeview; os campos serão preenchidos com os dados da NF e do produto.\n"
-                "2) Altere os campos necessários (Data, Cliente, Produto, Peso, Base) e clique em 'Alterar NF' para aplicar as mudanças.\n\n"
+                "2) Altere os campos necessários (Data, Cliente, Produto, Peso, Base) e clique em 'Alterar NF' para aplicar as mudanças.\n"
                 "3) Confirmadas as alterações, o sistema atualiza tanto a tabela de NF quanto a tabela de produtos vinculados (UPDATE no banco)."
             )
 

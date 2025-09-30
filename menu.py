@@ -151,52 +151,73 @@ class Janela_Menu(tk.Tk):
         return permissoes
 
     def _criar_sidebar(self):
-        """Cria a sidebar de navegação com fundo em azul escuro e rolagem."""
-        # Frame principal da sidebar
+        """Cria a sidebar de navegação com largura fixa (não encolhe mesmo se não houver botões)."""
+        # Frame principal da sidebar com largura fixa
         sidebar_frame = tk.Frame(self, bg="#2c3e50", width=220)
         sidebar_frame.pack(side="left", fill="y")
 
-        # Canvas para permitir rolagem
+        # Canvas para permitir rolagem (largura fixa para manter layout)
         self.sidebar_canvas = tk.Canvas(
             sidebar_frame,
             bg="#2c3e50",
             highlightthickness=0,
-            width=220
+            width=220,
+            bd=0
         )
-        self.sidebar_canvas.pack(side="left", fill="both", expand=True)
+        # importante: não usar expand=True aqui para evitar que o canvas cresça/encolha horizontalmente
+        self.sidebar_canvas.pack(side="left", fill="y")
 
-       # Scrollbar vertical (mais fina e com cor azul)
+        # Scrollbar vertical
         scrollbar = tk.Scrollbar(
             sidebar_frame,
             orient="vertical",
             command=self.sidebar_canvas.yview,
-            width=15,  # largura da barra de rolagem
-            troughcolor="#1a252f",  # cor de fundo do trilho
-            bg="#2980b9",           # cor da barra
-            activebackground="#3498db"  # cor ao clicar
+            width=15,
+            troughcolor="#1a252f",
+            bg="#2980b9",
+            activebackground="#3498db"
         )
         scrollbar.pack(side="right", pady=(60, 0), fill="y")
-
         self.sidebar_canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Frame interno que vai conter os widgets
-        self.sidebar_inner = tk.Frame(self.sidebar_canvas, bg="#2c3e50")
-        self.sidebar_canvas.create_window((0, 0), window=self.sidebar_inner, anchor="nw")
+        # Frame interno dentro do canvas (onde os botões serão colocados)
+        # definimos width=220 e pack_propagate(False) para que também não encolha
+        self.sidebar_inner = tk.Frame(self.sidebar_canvas, bg="#2c3e50", width=220)
 
-        # Atualiza região rolável automaticamente + “engana” para thumb menor
-        self.sidebar_inner.bind(
-            "<Configure>",
-            lambda e: self.sidebar_canvas.configure(
-                scrollregion=(0, 0, e.width, e.height + 200)  # +200 px extras para diminuir a thumb
-            )
-        )
+        # cria a window no canvas e guarda o id para poder ajustar largura quando o canvas mudar
+        self.sidebar_window = self.sidebar_canvas.create_window((0, 0), window=self.sidebar_inner, anchor="nw")
 
-        # Permite rolagem com roda do mouse
+        # quando o conteúdo interno mudar, atualiza a região de rolagem
+        def _on_inner_config(e):
+            # deixa um pouco de folga (200px) para reduzir o tamanho da thumb da scrollbar
+            self.sidebar_canvas.configure(scrollregion=(0, 0, e.width, e.height + 200))
+
+        self.sidebar_inner.bind("<Configure>", _on_inner_config)
+
+        # quando o canvas mudar de tamanho (ex.: redimensionamento da janela), ajusta a largura da window interna
+        def _on_canvas_config(e):
+            try:
+                # força a janela interna a ter a mesma largura do canvas (evita encolhimento)
+                self.sidebar_canvas.itemconfig(self.sidebar_window, width=e.width)
+            except Exception:
+                pass
+
+        self.sidebar_canvas.bind("<Configure>", _on_canvas_config)
+
+        # rolagem com roda do mouse
         def _on_mousewheel(event):
-            self.sidebar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            # padrão Windows: event.delta múltiplo de 120
+            try:
+                self.sidebar_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                # fallback mais simples
+                self.sidebar_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
 
+        # bind global apenas para a sidebar (não deve competir com outros widgets)
         self.sidebar_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
+
+        
     def _criar_cabecalho(self):
         """Cria o cabeçalho com a data, hora, título e botões à direita."""
         self.cabecalho = tk.Frame(self, bg="#34495e", height=80)
@@ -841,7 +862,8 @@ class Janela_Menu(tk.Tk):
         widget.bind("<ButtonPress>", lambda e: hide())
 
     def _abrir_ajuda_modal(self, contexto=None):
-        """Modal de Ajuda com layout profissional (navegação à esquerda e conteúdo à direita)."""
+        """Modal de Ajuda com layout profissional (navegação à esquerda e conteúdo à direita).
+        As seções exibidas no Listbox são montadas dinamicamente conforme as permissões do usuário."""
         try:
             modal = tk.Toplevel(self)
             modal.title("Ajuda — Sistema Kametal")
@@ -886,28 +908,128 @@ class Janela_Menu(tk.Tk):
                                 font=("Segoe UI", 10, "bold"))
             nav_title.pack(anchor="nw", pady=(8, 6), padx=12)
 
-            # Listbox com seções
-            sections = [
-                "Visão Geral",
-                "Saída de NFs",
-                "Base de Produtos",
-                "Base de Materiais",
-                "Entrada de NFs",
-                "Cálculo de NFs",
-                "Média Custo",
-                "Relatório Item por Grupo",
-                "Relatório Cotação",
-                "Registro de Teste",
-                "Usuários",
-                "Abas e Visões Rápidas",
-                "Fluxo / Estoque (impactos)",
-                "Exemplos Práticos",
-                "FAQ"
+            # --- Montagem dinâmica de seções com base em permissões ---
+            # Mapeamento: seção -> permissão necessária (None = visível para todos)
+            sections_with_perms = [
+                ("Visão Geral", None),
+                ("Saída de NFs", "SistemaNF"),
+                ("Base de Produtos", "criar_interface_produto"),
+                ("Base de Materiais", "criar_interface_materiais"),
+                ("Entrada de NFs", "Janela_InsercaoNF"),
+                ("Cálculo de NFs", "Calculo_Produto"),
+                ("Média Custo", "criar_media_custo"),
+                ("Relatório Item por Grupo", "RelatorioApp"),
+                ("Relatório Cotação", "CadastroProdutosApp"),
+                ("Registro de Teste", "RegistroTeste"),
+                ("Usuários", "criar_tela_usuarios"),
+                ("Abas e Visões Rápidas", None),
+                ("Fluxo / Estoque (impactos)", None),
+                ("Notificações (Sino)", "Calculo_Produto"),  # mesmo permissão do cálculo
+                ("Exemplos Práticos", None),
+                ("FAQ", None),
             ]
+
+            def _build_user_permission_set():
+                """Tenta extrair as permissões do usuário de várias formas comuns.
+                Retorna:
+                    - None se devemos usar self.has_permission(permission) (quando existir)
+                    - set(...) de permissões normalizadas (strings em lowercase) se encontradas
+                    - empty set() se encontrado explicitamente um objeto vazio
+                    - None (fallback) se não for possível detectar — nesse caso exibimos todas as seções.
+                """
+                # Se a classe tiver um método has_permission, usaremos ele (sinalizado por None)
+                if hasattr(self, "has_permission") and callable(getattr(self, "has_permission")):
+                    return None
+
+                candidates = []
+                try:
+                    if hasattr(self, "user_permissions"):
+                        candidates.append(getattr(self, "user_permissions"))
+                    if hasattr(self, "permissoes"):
+                        candidates.append(getattr(self, "permissoes"))
+                    if hasattr(self, "user") and getattr(self, "user") is not None:
+                        u = getattr(self, "user")
+                        if hasattr(u, "permissions"):
+                            candidates.append(getattr(u, "permissions"))
+                        if hasattr(u, "permissoes"):
+                            candidates.append(getattr(u, "permissoes"))
+                except Exception:
+                    # qualquer erro aqui => sem dados de permissão detectados
+                    return None
+
+                perms = set()
+                found_any = False
+                for c in candidates:
+                    if c is None:
+                        continue
+                    found_any = True
+                    # lista/tupla/set de strings ou objetos convertíveis
+                    if isinstance(c, (list, tuple, set)):
+                        for p in c:
+                            try:
+                                perms.add(str(p).lower())
+                            except Exception:
+                                pass
+                    # string única com separador (ex.: "perm1,perm2")
+                    elif isinstance(c, str):
+                        for p in c.split(","):
+                            p = p.strip()
+                            if p:
+                                perms.add(p.lower())
+                    # dicionário possivelmente com chaves sendo permissões
+                    elif isinstance(c, dict):
+                        for k in c.keys():
+                            try:
+                                perms.add(str(k).lower())
+                            except Exception:
+                                pass
+                    else:
+                        # tentativa de iterar
+                        try:
+                            for p in list(c):
+                                perms.add(str(p).lower())
+                            found_any = True
+                        except Exception:
+                            pass
+
+                if not found_any:
+                    return None
+                return perms
+
+            _user_perms = _build_user_permission_set()
+
+            def has_perm(required):
+                """Verifica se o usuário tem a permissão `required`.
+                - Se required is None => True
+                - Se self.has_permission exists => usa ele
+                - Se coletamos um set de permissões => verifica membership
+                - Se não conseguimos detectar nada => retorna True (exibir todas)"""
+                if required is None:
+                    return True
+                # Prioriza método self.has_permission(...)
+                if hasattr(self, "has_permission") and callable(getattr(self, "has_permission")):
+                    try:
+                        return bool(self.has_permission(required))
+                    except Exception:
+                        # se falhar, não bloqueia — tenta usar set abaixo
+                        pass
+                # Usa set coletado
+                if isinstance(_user_perms, set):
+                    return required.lower() in _user_perms
+                # Fallback: se não sabemos as permissões, mostrar tudo (comodidade)
+                return True
+
+            # Filtra as seções visíveis
+            visible_sections = [name for (name, perm) in sections_with_perms if has_perm(perm)]
+            if not visible_sections:
+                # fallback mínimo (garante que o modal não fique vazio)
+                visible_sections = ["Visão Geral"]
+
+            # Cria o listbox com as seções visíveis
             listbox = tk.Listbox(nav_frame, bd=0, highlightthickness=0, activestyle="none",
                                 font=("Segoe UI", 10), selectmode="browse", exportselection=False,
                                 bg="#fefefe")
-            for s in sections:
+            for s in visible_sections:
                 listbox.insert("end", s)
             listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
@@ -926,16 +1048,13 @@ class Janela_Menu(tk.Tk):
 
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
-                "A Janela Menu é a tela inicial do Sistema Kametal. Reúne acesso rápido aos módulos principais\n"
-                "e mostra resumos com as últimas movimentações (entradas/saídas, produtos e pesos).\n\n"
+                "A Janela Menu é a tela inicial do Sistema Kametal. Reúne acesso rápido aos módulos principais e mostra resumos com as últimas movimentações (entradas/saídas, produtos e pesos).\n\n"
                 "Áreas principais: barra lateral de navegação, cabeçalho superior, área central com abas e rodapé."
             )
 
             contents["Saída de NFs"] = (
                 "Saída de NFs\n\n"
-                "Esta janela registra e exibe as notas fiscais de saída (clientes). Contém: número da NF, cliente,\n"
-                "itens, peso por item e total. Ao confirmar uma saída, o sistema subtrai (debita) o peso/quantidade\n"
-                "dos produtos do estoque."
+                "Esta janela registra e exibe as notas fiscais de saída (clientes). Contém: número da NF, cliente, itens, peso por item e total. Ao confirmar uma saída, o sistema subtrai (debita) o peso/quantidade dos produtos do estoque."
             )
 
             contents["Base de Produtos"] = (
@@ -946,21 +1065,17 @@ class Janela_Menu(tk.Tk):
 
             contents["Base de Materiais"] = (
                 "Base de Materiais\n\n"
-                "Armazena as matérias-primas (insumos) usadas na fabricação. Informações chave: estoque, unidade\n"
-                "e composição (por exemplo, % de cobre, % de zinco). Esses valores são usados no cálculo do custo\n"
-                "e na composição dos produtos."
+                "Armazena as matérias-primas (insumos) usadas na fabricação. Informações chave: estoque, unidade e composição (por exemplo, % de cobre, % de zinco). Esses valores são usados no cálculo do custo e na composição dos produtos."
             )
 
             contents["Entrada de NFs"] = (
                 "Entrada de NFs\n\n"
-                "Tela para registrar as notas fiscais recebidas de fornecedores. Ao salvar uma NF de entrada, os\n"
-                "produtos/quantidades/pesos são adicionados (somados) ao estoque conforme informado."
+                "Tela para registrar as notas fiscais recebidas de fornecedores. Ao salvar uma NF de entrada, os produtos/quantidades/pesos são adicionados (somados) ao estoque conforme informado."
             )
 
             contents["Cálculo de NFs"] = (
                 "Cálculo de NFs\n\n"
-                "Ferramenta que calcula o custo associado a cada NF de entrada. Aplica regras como perdas, rendimentos\n"
-                "e rateio entre itens, usando informações de Base de Materiais e Base de Produtos para distribuir custos."
+                "Ferramenta que calcula o custo associado a cada NF de entrada. Aplica regras como perdas, rendimentos e rateio entre itens, usando informações de Base de Materiais e Base de Produtos para distribuir custos."
             )
 
             contents["Média Custo"] = (
@@ -977,26 +1092,22 @@ class Janela_Menu(tk.Tk):
 
             contents["Relatório Cotação"] = (
                 "Relatório Cotação\n\n"
-                "Área para registrar cotações e valores de referência (preço do produto, câmbio). A partir desses dados\n"
-                "o sistema monta gráficos que ajudam a visualizar tendências e impactos no custo."
+                "Área para registrar cotações e valores de referência (preço do produto, câmbio). A partir desses dados o sistema monta gráficos que ajudam a visualizar tendências e impactos no custo."
             )
 
             contents["Registro de Teste"] = (
                 "Registro de Teste\n\n"
-                "Módulo para armazenar histórico de testes e inspeções feitos nos produtos que saem — por exemplo,\n"
-                "controle de qualidade, amostras, observações técnicas. Útil para rastreabilidade."
+                "Módulo para armazenar histórico de testes e inspeções feitos nos produtos que saem — por exemplo, controle de qualidade, amostras, observações técnicas. Útil para rastreabilidade."
             )
 
             contents["Usuários"] = (
                 "Usuários\n\n"
-                "Tela de gestão de usuários: criar, editar, remover e atribuir permissões. Controle de acesso\n"
-                "importante para evitar ações não autorizadas (ex.: excluir registros, alterar preços)."
+                "Tela de gestão de usuários: criar, editar, remover e atribuir permissões. Controle de acesso importante para evitar ações não autorizadas (ex.: excluir registros, alterar preços)."
             )
 
             contents["Abas e Visões Rápidas"] = (
                 "Abas e Visões Rápidas\n\n"
-                "As abas centrais (ex.: 'Últimas NFs') mostram uma visão rápida do sistema: tabelas com as últimas\n"
-                "movimentações, filtros e seleção para acessar detalhes. Sirvem para monitoramento diário."
+                "As abas centrais (ex.: 'Últimas NFs') mostram uma visão rápida do sistema: tabelas com as últimas movimentações, filtros e seleção para acessar detalhes. Sirvem para monitoramento diário."
             )
 
             contents["Fluxo / Estoque (impactos)"] = (
@@ -1005,6 +1116,29 @@ class Janela_Menu(tk.Tk):
                 " - Saída de NF: subtrai do estoque.\n"
                 " - Cálculo de NFs: em geral analítico; verifique se existe confirmação que aplica ajustes ao estoque.\n\n"
                 "Boas práticas: validar pesos antes de confirmar, reconciliar inventário e manter backups."
+            )
+
+            contents["Notificações (Sino)"] = (
+                "Notificações (Sino)\n\n"
+                "O botão do sino (🔔) aparece no canto superior direito do cabeçalho **apenas** para usuários com permissão 'Calculo_Produto'. Ele serve para alertar sobre a limpeza mensal do histórico de cálculos e outros eventos enviados pelo servidor via NOTIFY.\n\n"
+                "Comportamento e significado:\n"
+                " - A badge (pequeno círculo com número) sobre o sino indica o número de dias restantes até a 'Limpeza Mensal de Registros'.\n"
+                " - Cor AMARELA — aviso: faltando alguns dias para a limpeza (por exemplo, 5 dias).\n"
+                " - Cor VERMELHA + EFEITO DE PISCAR — nível crítico: faltando pouquíssimos dias para a limpeza (por exemplo, 2 dias).\n"
+                " - Clicar no sino força a abertura do modal de aviso (mesmo que não esteja crítico) — é o atalho manual para `mostrar_aviso_purga(force=True)`.\n\n"
+                "Integração com PostgreSQL / NOTIFY:\n"
+                " - A aplicação realiza `LISTEN canal_atualizacao` (conexão separada) e processa payloads recebidos do servidor.\n"
+                "Mensagens recebidas do servidor e o que elas fazem:\n"
+                " - 'purge:<n>'  — atualiza o número mostrado na badge para <n> dias restantes (ex.: 'purge:3' fará a badge mostrar '3').\n"
+                " - 'purge_warning' ou 'purge' — pede que o sistema verifique novamente se a limpeza está próxima e atualize a informação exibida ao usuário.\n"
+                " - 'menu_atualizado' — pede que o sistema recarregue os menus e o conteúdo da tela para mostrar informações mais recentes.\n"
+                " - Outras mensagens desconhecidas — o sistema tentará atualizar a tela/menu para manter tudo sincronizado; se algo não atualizar, peça para a equipe de backend investigar.\n\n"
+                " - O sistema pode abrir automaticamente o modal de aviso quando estiver em nível crítico (por ex. faltando 2 dias ou menos). Isso evita que o usuário perca o prazo para exportar/recuperar dados.\n\n"
+                "Problemas comuns / Soluções:\n"
+                " - Sino/badge não aparece: verifique se o usuário tem a permissão 'Calculo_Produto'.\n"
+                " - Badge não atualiza: confirme que o backend está chamando `NOTIFY canal_atualizacao, 'purge:<n>'` ou 'purge_warning' e que a conexão `conn_listen` não foi fechada.\n"
+                " - Modal não abre automaticamente: cheque os valores de `purge_warning_days` e `purge_critical_days` e se `check_purge_status` está sendo agendado corretamente.\n\n"
+                "Observação: o sino/badge é uma camada de alerta — os dados reais e as ações (exportar, excluir, ajustar) estão disponíveis no modal que é aberto quando você clica no sino."
             )
 
             contents["Exemplos Práticos"] = (
@@ -1030,16 +1164,24 @@ class Janela_Menu(tk.Tk):
                 txt.configure(state="disabled")
                 txt.yview_moveto(0)
 
-            # Inicializa com a primeira seção selecionada
-            listbox.selection_set(0)
-            mostrar_secao(sections[0])
+            # Inicializa com a primeira seção visível selecionada
+            try:
+                listbox.selection_set(0)
+                mostrar_secao(visible_sections[0])
+            except Exception:
+                # se algo falhar, tenta mostrar Visão Geral
+                if "Visão Geral" in contents:
+                    mostrar_secao("Visão Geral")
 
             # Bind para mudar seção ao clicar
             def on_select(evt):
                 sel = listbox.curselection()
                 if sel:
                     idx = sel[0]
-                    key = sections[idx]
+                    try:
+                        key = visible_sections[idx]
+                    except Exception:
+                        return
                     mostrar_secao(key)
 
             listbox.bind("<<ListboxSelect>>", on_select)
@@ -1276,45 +1418,124 @@ class Janela_Menu(tk.Tk):
         versao_label.place(relx=0.0, rely=1.0, x=10, y=-10, anchor="sw")
 
     def _criar_abas(self):
-        """Cria as abas do Notebook conforme self.permissoes e popula cada uma."""
-        # limpa abas existentes
+        """Cria as abas do Notebook conforme self.permissoes e popula cada uma.
+        Garante ao menos uma aba final (mensagem) se o usuário não tiver permissão para nada."""
+        # --- cancela spinner/placeholder criado na inicialização para evitar que o "Carregando" fique sozinho ---
+        try:
+            if getattr(self, "_spinner_job", None):
+                try:
+                    self.after_cancel(self._spinner_job)
+                except Exception:
+                    pass
+                self._spinner_job = None
+        except Exception:
+            pass
+
+        # Se existir frame_placeholder (criado por _criar_abas_minimal), tente removê-lo
+        try:
+            if getattr(self, "frame_placeholder", None):
+                try:
+                    self.notebook.forget(self.frame_placeholder)
+                except Exception:
+                    pass
+                # tentar destruir widgets internos se existirem
+                try:
+                    if getattr(self, "spinner_label", None):
+                        try:
+                            self.spinner_label.destroy()
+                        except Exception:
+                            pass
+                        self.spinner_label = None
+                except Exception:
+                    pass
+                self.frame_placeholder = None
+        except Exception:
+            pass
+
+        # limpa abas existentes (segurança)
         for tab in self.notebook.tabs():
-            self.notebook.forget(tab)
-        # Últimas NFs
+            try:
+                self.notebook.forget(tab)
+            except Exception:
+                pass
+
+        # --- cria abas condicionais como antes ---
+        added = 0
         if "Janela_InsercaoNF" in self.permissoes or "SistemaNF" in self.permissoes:
             self.frame_nf = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_nf, text="Últimas NFs")
-            self.criar_relatorio_nf()
-        # Relatórios Produto/Material
+            try:
+                self.criar_relatorio_nf()
+            except Exception:
+                pass
+            added += 1
+
         if "criar_interface_materiais" in self.permissoes or "criar_interface_produto" in self.permissoes:
             self.frame_relatorios_produto_material = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_relatorios_produto_material, text="Relatórios Produto/Material")
-            self.criar_relatorio_produto_material()
-        # Relatório de Estoque e Gráficos de Custo
+            try:
+                self.criar_relatorio_produto_material()
+            except Exception:
+                pass
+            added += 1
+
         if "criar_media_custo" in self.permissoes:
-            # relatório
             self.frame_relatorio = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_relatorio, text="Relatório de Estoque")
-            self.criar_relatorio_estoque(self.conn)
-            # gráfico
+            try:
+                self.criar_relatorio_estoque(self.conn)
+            except Exception:
+                pass
             self.frame_graficos = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_graficos, text="Gráficos de Custo")
-            self.criar_grafico_mensal("Custo Médio de Cada Produto", [])
-        # Gráfico Produtos
+            try:
+                self.criar_grafico_mensal("Custo Médio de Cada Produto", [])
+            except Exception:
+                pass
+            added += 1
+
         if "CadastroProdutosApp" in self.permissoes:
             self.frame_grafico_produtos = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_grafico_produtos, text="Gráfico Produtos")
-            self.criar_grafico_produtos()
-        # Gráfico Dólar
-        if "CadastroProdutosApp" in self.permissoes:
+            try:
+                self.criar_grafico_produtos()
+            except Exception:
+                pass
             self.frame_grafico_dolar = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_grafico_dolar, text="Gráfico Dólar")
-            self.criar_grafico_dolar()
-        # Últimos Registros de Teste (se permitido)
+            try:
+                self.criar_grafico_dolar()
+            except Exception:
+                pass
+            added += 1
+
         if "RegistroTeste" in self.permissoes:
             self.frame_ultimos_registros_teste = tk.Frame(self.notebook, bg="#ecf0f1")
             self.notebook.add(self.frame_ultimos_registros_teste, text="Últimos Registros de Teste")
-            self.criar_aba_ultimos_registros_teste()
+            try:
+                self.criar_aba_ultimos_registros_teste()
+            except Exception:
+                pass
+            added += 1
+
+        # Se nenhuma aba foi adicionada, inserimos uma aba com mensagem (mantém a área do notebook igual)
+        if added == 0:
+            frame_none = tk.Frame(self.notebook, bg="#ecf0f1")
+            self.notebook.add(frame_none, text="Visão Rápida")
+            tk.Label(
+                frame_none,
+                text="Você não tem permissão para visualizar os relatórios/abas desta área.",
+                bg="#ecf0f1",
+                font=("Helvetica", 12),
+                wraplength=700,
+                justify="center"
+            ).pack(expand=True, fill="both", pady=40)
+
+        # Atualiza a barra de abas (botões) para refletir o novo conteúdo
+        try:
+            self._atualizar_barra_abas()
+        except Exception:
+            pass
 
     def _criar_abas_minimal(self):
         self.frame_placeholder = tk.Frame(self.notebook, bg="#ecf0f1")

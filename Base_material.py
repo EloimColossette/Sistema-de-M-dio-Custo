@@ -408,8 +408,7 @@ class InterfaceMateriais:
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
                 "A tela de Materiais centraliza o cadastro de matérias-primas, valores, fornecedores e agrupamentos.\n"
-                "Use os campos para inserir Nome, Fornecedor, Valor e Grupo. A Treeview lista os registros;\n"
-                "selecione um item para carregar seus dados nos campos."
+                "Use os campos para inserir Nome, Fornecedor, Valor e Grupo. A Treeview lista os registros; selecione um item para carregar seus dados nos campos."
             )
 
             contents["Adicionar Material"] = (
@@ -448,8 +447,7 @@ class InterfaceMateriais:
                 "  • Digite o nome do fornecedor no campo 'Novo Fornecedor' e clique em 'Excluir'.\n"
                 "  • O item será removido da combobox e do arquivo JSON.\n\n"
                 "Observações:\n"
-                " - Fornecedores utilizados em materiais existentes não são removidos do banco automaticamente;\n"
-                "   ao excluir um fornecedor, verifique se registros dependentes precisam ser ajustados."
+                " - Fornecedores utilizados em materiais existentes não são removidos do banco automaticamente; ao excluir um fornecedor, verifique se registros dependentes precisam ser ajustados."
             )
 
             contents["Botão Limpar (Campos)"] = (

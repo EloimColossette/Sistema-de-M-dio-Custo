@@ -425,8 +425,7 @@ class CadastroProdutosApp:
 
             contents["Visão Geral"] = (
             "Visão Geral\n\n"
-            "Esta ajuda descreve as ações básicas em Cotação (Produtos) e Cotação (Dólar) e mostra, passo a passo, como\n"
-            "editar datas *no próprio lugar* (sem precisar mexer no banco manualmente)."
+            "Esta ajuda descreve as ações básicas em Cotação (Produtos) e Cotação (Dólar) e mostra, passo a passo, como editar datas *no próprio lugar* (sem precisar mexer no banco manualmente)."
             )
 
             contents["Cotação — Aba Cadastro (Salvar / Editar / Excluir / Pesquisar)"] = (

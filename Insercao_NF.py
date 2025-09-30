@@ -410,11 +410,12 @@ class Janela_InsercaoNF(tk.Toplevel):
 
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
-                "Esta janela é destinada à **Entrada de produto vindo do fornecedor** — ou seja, registrar o que entrou em estoque "
-                "a partir de uma Nota Fiscal (NF). Esta tela NÃO realiza cálculos de custo aqui: as informações principais já vêm "
-                "na própria NF (produto, peso, base, fornecedor, etc.).\n\n"
+                "Esta janela é destinada à **Entrada de produto vindo do fornecedor** — ou seja, registrar o que entrou em estoque a partir de uma Nota Fiscal (NF). Esta tela NÃO realiza cálculos de custo aqui: as informações principais já vêm na própria NF (produto, peso, base, fornecedor, etc.).\n\n"
                 "Fluxo típico: abrir Nova Entrada → informar dados da NF (data, número, fornecedor) → adicionar os produtos conforme a NF → salvar.\n\n"
-                "Observação: toda regra de custo/calculo (se existir) é tratada em outros módulos; aqui gravamos a entrada conforme a NF."
+                "AVISO IMPORTANTE — ORDEM CORRETA PARA ATUALIZAÇÃO DE CUSTO/ESTOQUE:\n"
+                " - Depois de salvar a NF na tela Entrada, abra a janela 'Cálculo NFs' e confirme que o custo total e o estoque da(s) linha(s) estão corretos. Somente após confirmar/registrar a NF em 'Cálculo NFs' proceda para a janela 'Média Custo'.\n"
+                " - Se você pular esse passo e for direto para 'Média Custo', a nota recém-entrada **não** será considerada no cálculo de custo nem atualizará corretamente o saldo de estoque.\n\n"
+                "Observação: toda regra de custo/cálculo (se existir) é tratada em outros módulos; aqui gravamos a entrada conforme a NF."
             )
 
             contents["Adicionar NF"] = (
@@ -423,7 +424,7 @@ class Janela_InsercaoNF(tk.Toplevel):
                 "   - Data: não é necessário digitar as barras. Ex.: '01012025' será automaticamente formatado como '01/01/2025'.\n"
                 "   - Campos numéricos: não é necessário digitar a vírgula. Basta digitar os números que o sistema formata sozinho. "
                 "Ex.: '2500' vira '25,00'.\n"
-                "     Isso vale para os seguintes campos:\n"
+                "Isso vale para os seguintes campos:\n"
                 "       • custo da empresa\n"
                 "       • IPI\n"
                 "       • valor integral\n"
@@ -444,6 +445,12 @@ class Janela_InsercaoNF(tk.Toplevel):
                 "   - Repita quantas vezes forem necessárias: cada produto se tornará uma linha na Treeview, todos vinculados ao mesmo número de NF.\n\n"
                 "4) Salvar NF\n"
                 "   - Depois de adicionar todos os produtos da nota, clique em 'Salvar NF' para gravar a nota e os itens no banco de dados.\n\n"
+                "AVISO IMPORTANTE — FLUXO RECOMENDADO (Entrada → Cálculo NFs → Média Custo):\n"
+                " - Após salvar a NF aqui, **não** vá diretamente para 'Média Custo'. Primeiro abra 'Cálculo NFs' e:\n"
+                "    1) Localize a NF / as linhas correspondentes.\n"
+                "    2) Verifique o custo total e confirme/subtraia/ajuste o estoque conforme necessário.\n"
+                "    3) Confirme para que o sistema registre corretamente a entrada no módulo de cálculo.\n"
+                " - Só após esses passos abra 'Média Custo' para que a janela de média inclua a NF recém-entrada no cálculo de custo e atualize o estoque corretamente.\n\n"
                 "Dica: Se um item cadastrado recentemente (fornecedor, material ou produto) não aparecer na lista, feche e reabra a tela de Entrada para recarregar as opções."
             )
 
@@ -463,9 +470,8 @@ class Janela_InsercaoNF(tk.Toplevel):
             contents["Calculadora: Média Ponderada"] = (
                 "Calculadora — Média Ponderada (quando usar)\n\n"
                 " • Use a média ponderada somente quando **a mesma NF contém mais de uma ocorrência do mesmo material** com preços diferentes.\n"
-                " • Procedimento: selecione as linhas que representam o mesmo material dentro da NF e aplique a média ponderada — o sistema calculará\n"
-                "   o custo médio considerando peso/quantidade como fator de ponderação.\n"
-                " • Em entradas simples (um único registro por material) não é necessário utilizar essa calculadora."
+                " • Procedimento: selecione as linhas que representam o mesmo material dentro da NF e aplique a média ponderada — o sistema calculará o custo médio considerando peso/quantidade como fator de ponderação.\n"
+                " • Em entradas simples (um único registro por material) não é necessário utilizar essa calculadora.\n"
                 " • Nas entradas da calculadora (Peso e Valor) digite apenas dígitos: o campo formata a vírgula automaticamente."
             )
 
@@ -478,8 +484,7 @@ class Janela_InsercaoNF(tk.Toplevel):
 
             contents["Colunas Dinâmicas (Ocultar / Mostrar)"] = (
                 "Colunas Dinâmicas — ocultar e mostrar\n\n"
-                " • Quando uma NF possui muitos materiais diferentes (ou se houver muitas colunas geradas por diferentes materiais),\n"
-                "   a visualização pode ficar poluída. Utilize a funcionalidade de ocultar/mostrar colunas para exibir apenas o que interessa.\n"
+                " • Quando uma NF possui muitos materiais diferentes (ou se houver muitas colunas geradas por diferentes materiais), a visualização pode ficar poluída. Utilize a funcionalidade de ocultar/mostrar colunas para exibir apenas o que interessa.\n"
                 " • Recomenda-se ocultar colunas de materiais pouco relevantes durante análises rápidas e restaurá-las quando precisar de detalhes."
             )
 

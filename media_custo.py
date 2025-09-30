@@ -313,8 +313,7 @@ class MediaCusto:
             contents = {}
             contents["Visão Geral"] = (
                 "Visão Geral\n\n"
-                "Esta janela apresenta a Tabela de Produtos com cálculos de média ponderada do custo\n"
-                "e simulações com acréscimos. Use as abas para ver as versões por regime/região fiscal."
+                "Esta janela apresenta a Tabela de Produtos com cálculos de média ponderada do custo e simulações com acréscimos. Use as abas para ver as versões por regime/região fiscal."
             )
 
             contents["Aba ICM (ICM 18%)"] = (
@@ -329,8 +328,7 @@ class MediaCusto:
                 "Esta aba aplica a fórmula ajustada para o regime/regra fiscal do Sudeste, usando alíquota efetiva de 12%.\n\n"
                 "O que muda em relação à aba ICM 18%:\n"
                 " - O fator de conversão aplicado às médias ponderadas é diferente (reduz o impacto tributário).\n"
-                " - São usados os mesmos dados de entrada (estoque e custos do banco), porém o resultado final\n"
-                "   (Média de Custo do Estoque / Custo Empresa) é recalculado com coeficientes próprios desta região.\n\n"
+                " - São usados os mesmos dados de entrada (estoque e custos do banco), porém o resultado final (Média de Custo do Estoque / Custo Empresa) é recalculado com coeficientes próprios desta região.\n\n"
                 "Observações práticas:\n"
                 " - Use esta aba para simular preços de venda/markups quando o cliente ou operação estiver no Sudeste.\n"
                 " - Se os valores estiverem muito distantes da aba ICM 18%, verifique as fórmulas em\n"
@@ -342,15 +340,11 @@ class MediaCusto:
                 "Centro-Oeste / Nordeste (7%) — detalhes operacionais\n\n"
                 "Nesta aba os cálculos usam o coeficiente definido para regiões com alíquota efetiva aproximada de 7%.\n\n"
                 "O que considerar:\n"
-                " - Além de alterar apenas a alíquota, o módulo pode aplicar ajustes regionais de custo logístico\n"
-                "   ou incentivos/fatores locais (ver 'aba_centro_oeste_media_custo.py').\n"
-                " - Use esta aba para avaliar margens em centros de distribuição localizados nessas regiões,\n"
-                "   pois custos e tributações podem reduzir o preço final comparado ao Sudeste/ICM 18%.\n\n"
+                " - Além de alterar apenas a alíquota, o módulo pode aplicar ajustes regionais de custo logístico ou incentivos/fatores locais (ver 'aba_centro_oeste_media_custo.py').\n"
+                " - Use esta aba para avaliar margens em centros de distribuição localizados nessas regiões, pois custos e tributações podem reduzir o preço final comparado ao Sudeste/ICM 18%.\n\n"
                 "Boas práticas:\n"
-                " - Compare as três abas antes de definir o preço de venda para um cliente: ICM 18% (base),\n"
-                "   Sudeste (12%) e Centro-Oeste/Nordeste (7%). Isso ajuda a mapear risco de margem por região.\n"
-                " - Ao detectar discrepâncias grandes, verifique as tabelas auxiliares (frete, armazenagem) e\n"
-                "   valide se algum ajuste extra está sendo aplicado no módulo regional."
+                " - Compare as três abas antes de definir o preço de venda para um cliente: ICM 18% (base), Sudeste (12%) e Centro-Oeste/Nordeste (7%). Isso ajuda a mapear risco de margem por região.\n"
+                " - Ao detectar discrepâncias grandes, verifique as tabelas auxiliares (frete, armazenagem) e valide se algum ajuste extra está sendo aplicado no módulo regional."
             )
 
             contents["Exportação"] = (
